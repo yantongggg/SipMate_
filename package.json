@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start": "EXPO_NO_TELEMETRY=1 npx expo start --tunnel --clear",
-    "dev": "EXPO_NO_TELEMETRY=1 npx expo start --tunnel --clear",
+    "start": "EXPO_NO_TELEMETRY=1 npx expo start --clear",
+    "dev": "EXPO_NO_TELEMETRY=1 npx expo start --clear",
     "build:web": "npx expo export --platform web",
     "lint": "npx expo lint"
   },
