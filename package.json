@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start": "EXPO_NO_TELEMETRY=1 npx expo start --port 9999",
-    "dev": "EXPO_NO_TELEMETRY=1 npx expo start --port 9999",
+    "start": "npx expo start --web",
+    "dev": "npx expo start --web",
     "build:web": "npx expo export --platform web",
     "lint": "npx expo lint"
   },

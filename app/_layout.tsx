@@ -6,8 +6,12 @@ import { useFonts, PlayfairDisplay_400Regular, PlayfairDisplay_700Bold } from '@
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { WineProvider } from '@/contexts/WineContext';
+import { Platform } from 'react-native';
 
-SplashScreen.preventAutoHideAsync();
+// Only prevent auto-hide on native platforms
+if (Platform.OS !== 'web') {
+  SplashScreen.preventAutoHideAsync();
+}
 
 export default function RootLayout() {
   useFrameworkReady();
@@ -19,24 +23,28 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (fontsLoaded) {
-      SplashScreen.hideAsync();
+      // Only hide splash screen on native platforms
+      if (Platform.OS !== 'web') {
+        SplashScreen.hideAsync();
+      }
     }
   }, [fontsLoaded]);
 
-  if (!fontsLoaded) {
-    return null;
+  // On web, don't wait for fonts to load
+  if (Platform.OS === 'web' || fontsLoaded) {
+    return (
+      <AuthProvider>
+        <WineProvider>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="auth" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="+not-found" />
+          </Stack>
+          <StatusBar style="dark" />
+        </WineProvider>
+      </AuthProvider>
+    );
   }
 
-  return (
-    <AuthProvider>
-      <WineProvider>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="auth" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="+not-found" />
-        </Stack>
-        <StatusBar style="dark" />
-      </WineProvider>
-    </AuthProvider>
-  );
+  return null;
 }
