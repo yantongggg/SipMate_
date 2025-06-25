@@ -2,237 +2,333 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   SafeAreaView,
   ScrollView,
+  TouchableOpacity,
   TextInput,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
+  FlatList,
 } from 'react-native';
-import { Heart, Sparkles, Coffee, Users, MessageCircle, Send } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Heart, MessageCircle, Send, Star, DollarSign } from 'lucide-react-native';
+import { useWine } from '@/contexts/WineContext';
+import WineCard from '@/components/WineCard';
+import { Database } from '@/lib/supabase';
 
-const moods = [
-  { id: 'romantic', name: 'Romantic', icon: Heart, color: '#E91E63' },
-  { id: 'celebration', name: 'Celebration', icon: Sparkles, color: '#D4AF37' },
-  { id: 'relaxing', name: 'Relaxing', icon: Coffee, color: '#8BC34A' },
-  { id: 'social', name: 'Social', icon: Users, color: '#2196F3' },
+type Wine = Database['public']['Tables']['wines']['Row'];
+
+const MOODS = [
+  { emoji: '😢', label: 'Comfort', keywords: ['smooth', 'mellow', 'comforting'] },
+  { emoji: '🎉', label: 'Celebration', keywords: ['premium', 'special', 'festive'] },
+  { emoji: '😰', label: 'Relaxing', keywords: ['light', 'easy', 'casual'] },
+  { emoji: '💕', label: 'Romantic', keywords: ['elegant', 'sophisticated', 'intimate'] },
+  { emoji: '🍽️', label: 'Dinner', keywords: ['food pairing', 'bold', 'complex'] },
+  { emoji: '☀️', label: 'Summer', keywords: ['refreshing', 'crisp', 'light'] },
 ];
 
-export default function RecommendationsScreen() {
-  const [selectedMood, setSelectedMood] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState<Array<{ id: string; text: string; isUser: boolean }>>([]);
-  const [currentMessage, setCurrentMessage] = useState('');
-  const [activeTab, setActiveTab] = useState<'mood' | 'chat'>('mood');
-  const [recommendations, setRecommendations] = useState<string[]>([]);
+const PRICE_RANGES = [
+  { label: 'Budget ($0-$30)', min: 0, max: 30 },
+  { label: 'Mid-range ($30-$80)', min: 30, max: 80 },
+  { label: 'Premium ($80-$200)', min: 80, max: 200 },
+  { label: 'Luxury ($200+)', min: 200, max: 9999 },
+];
 
-  const handleMoodSelect = (moodId: string) => {
-    setSelectedMood(moodId);
-    const mood = moods.find(m => m.id === moodId);
-    
-    // Mock recommendations based on mood
-    let wineRecs: string[] = [];
-    switch (moodId) {
-      case 'romantic':
-        wineRecs = [
-          '🍷 Châteauneuf-du-Pape - Perfect for intimate evenings with its rich, complex flavors',
-          '🥂 Dom Pérignon - Elegant champagne for romantic celebrations',
-          '🍷 Barolo - Sophisticated Italian wine with deep, passionate notes'
-        ];
-        break;
-      case 'celebration':
-        wineRecs = [
-          '🥂 Krug Grande Cuvée - Premium champagne for special occasions',
-          '🍷 Opus One - Luxury Bordeaux blend for milestone celebrations',
-          '🥂 Veuve Clicquot - Classic celebration champagne with perfect bubbles'
-        ];
-        break;
-      case 'relaxing':
-        wineRecs = [
-          '🍷 Pinot Noir from Oregon - Light, smooth, perfect for unwinding',
-          '🍾 Sancerre - Crisp white wine ideal for peaceful evenings',
-          '🍷 Côtes du Rhône - Easy-drinking red for relaxed moments'
-        ];
-        break;
-      case 'social':
-        wineRecs = [
-          '🍷 Prosecco - Fun, bubbly wine perfect for group gatherings',
-          '🍷 Chianti Classico - Food-friendly Italian wine great for dinner parties',
-          '🍾 Albariño - Refreshing Spanish white wine ideal for social settings'
-        ];
-        break;
+interface ChatMessage {
+  id: string;
+  text: string;
+  isUser: boolean;
+  timestamp: Date;
+}
+
+export default function RecommendationsScreen() {
+  const { wines } = useWine();
+  const [selectedMood, setSelectedMood] = useState<string | null>(null);
+  const [selectedPriceRange, setSelectedPriceRange] = useState<typeof PRICE_RANGES[0] | null>(null);
+  const [recommendations, setRecommendations] = useState<Wine[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: '1',
+      text: "Hello! I'm your wine assistant. Tell me your mood, budget, or what you're looking for, and I'll recommend the perfect wine for you. 🍷",
+      isUser: false,
+      timestamp: new Date(),
     }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+
+  const getRecommendationsByFilters = () => {
+    let filtered = wines;
     
-    setRecommendations(wineRecs);
+    // Filter by price range
+    if (selectedPriceRange) {
+      filtered = filtered.filter(w => {
+        const price = w.price || 0;
+        return price >= selectedPriceRange.min && price <= selectedPriceRange.max;
+      });
+    }
+
+    // Filter by mood
+    if (selectedMood) {
+      switch (selectedMood) {
+        case 'Comfort':
+          filtered = filtered.filter(w => 
+            w.type === 'red' && 
+            (w.description?.toLowerCase().includes('smooth') || 
+             w.food_pairing?.toLowerCase().includes('comfort'))
+          );
+          break;
+        case 'Celebration':
+          filtered = filtered.filter(w => 
+            (w.price || 0) > 100 || 
+            w.rating && w.rating >= 4.5
+          );
+          break;
+        case 'Relaxing':
+          filtered = filtered.filter(w => 
+            w.type === 'white' || 
+            (w.alcohol_percentage || 0) < 13
+          );
+          break;
+        case 'Romantic':
+          filtered = filtered.filter(w => 
+            w.region?.toLowerCase().includes('france') ||
+            w.description?.toLowerCase().includes('elegant')
+          );
+          break;
+        case 'Dinner':
+          filtered = filtered.filter(w => 
+            w.food_pairing && w.food_pairing.length > 0
+          );
+          break;
+        case 'Summer':
+          filtered = filtered.filter(w => 
+            w.type === 'white' || 
+            w.food_pairing?.toLowerCase().includes('light')
+          );
+          break;
+      }
+    }
+
+    // Sort by rating and limit results
+    return filtered
+      .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+      .slice(0, 6);
+  };
+
+  const handleMoodSelect = (mood: string) => {
+    setSelectedMood(selectedMood === mood ? null : mood);
+    updateRecommendations();
+  };
+
+  const handlePriceRangeSelect = (range: typeof PRICE_RANGES[0]) => {
+    setSelectedPriceRange(selectedPriceRange?.label === range.label ? null : range);
+    updateRecommendations();
+  };
+
+  const updateRecommendations = () => {
+    setTimeout(() => {
+      const recs = getRecommendationsByFilters();
+      setRecommendations(recs);
+    }, 100);
+  };
+
+  const getAIResponse = (userMessage: string): string => {
+    const message = userMessage.toLowerCase();
+    
+    if (message.includes('budget') || message.includes('cheap') || message.includes('affordable')) {
+      return "For budget-friendly options, I recommend looking at wines under $30. These can still offer great quality and flavor! Try filtering by the Budget price range. 💰";
+    } else if (message.includes('expensive') || message.includes('premium') || message.includes('luxury')) {
+      return "For premium wines, look at our luxury selection over $200. These wines offer exceptional quality and are perfect for special occasions! 🥂";
+    } else if (message.includes('red') || message.includes('bold')) {
+      return "Red wines are perfect for bold flavors! Look for wines with good tannins and rich flavors. Try the 'Dinner' mood for food-pairing reds. 🍷";
+    } else if (message.includes('white') || message.includes('light') || message.includes('crisp')) {
+      return "White wines are refreshing and versatile! Perfect for summer days or lighter meals. Try the 'Summer' or 'Relaxing' moods. 🥂";
+    } else if (message.includes('food') || message.includes('pairing') || message.includes('dinner')) {
+      return "Food pairing is essential! Try the 'Dinner' mood to see wines with detailed food pairing suggestions. What type of cuisine are you planning? 🍽️";
+    } else if (message.includes('celebration') || message.includes('party') || message.includes('special')) {
+      return "For celebrations, choose something special! Try the 'Celebration' mood for premium wines perfect for memorable moments. 🎉";
+    } else if (message.includes('romantic') || message.includes('date')) {
+      return "For romantic occasions, try elegant wines with sophistication. The 'Romantic' mood will show you perfect wines for intimate moments. 💕";
+    } else {
+      return "I'd love to help you find the perfect wine! Try selecting a mood or price range above, or tell me more about what you're looking for - budget, occasion, or flavor preferences? 🤔🍷";
+    }
   };
 
   const handleSendMessage = () => {
-    if (!currentMessage.trim()) return;
+    if (!chatInput.trim()) return;
 
-    const userMessage = {
+    const userMessage: ChatMessage = {
       id: Date.now().toString(),
-      text: currentMessage,
+      text: chatInput,
       isUser: true,
+      timestamp: new Date(),
     };
 
-    const aiResponse = {
+    const aiResponse: ChatMessage = {
       id: (Date.now() + 1).toString(),
-      text: generateAIResponse(currentMessage),
+      text: getAIResponse(chatInput),
       isUser: false,
+      timestamp: new Date(),
     };
 
     setChatMessages(prev => [...prev, userMessage, aiResponse]);
-    setCurrentMessage('');
+    setChatInput('');
+
+    // Auto-select filters based on user input
+    const message = chatInput.toLowerCase();
+    if (message.includes('budget') || message.includes('cheap')) {
+      setSelectedPriceRange(PRICE_RANGES[0]);
+    } else if (message.includes('premium') || message.includes('expensive')) {
+      setSelectedPriceRange(PRICE_RANGES[3]);
+    }
+    
+    if (message.includes('celebration')) {
+      setSelectedMood('Celebration');
+    } else if (message.includes('romantic')) {
+      setSelectedMood('Romantic');
+    } else if (message.includes('dinner') || message.includes('food')) {
+      setSelectedMood('Dinner');
+    }
+
+    updateRecommendations();
   };
 
-  const generateAIResponse = (message: string): string => {
-    const lowerMessage = message.toLowerCase();
-    
-    if (lowerMessage.includes('red wine') || lowerMessage.includes('red')) {
-      return "For red wines, I'd recommend:\n\n🍷 Caymus Cabernet Sauvignon - Rich and bold from Napa Valley\n🍷 Château Margaux - Elegant Bordeaux with complex flavors\n🍷 Barolo - Prestigious Italian wine with earthy notes\n\nWhat kind of occasion or food pairing are you considering?";
-    }
-    
-    if (lowerMessage.includes('white wine') || lowerMessage.includes('white')) {
-      return "For white wines, here are my top picks:\n\n🍾 Cloudy Bay Sauvignon Blanc - Crisp and refreshing from New Zealand\n🍾 Dom Pérignon - Premium champagne for special occasions\n🍾 Chablis - Mineral-driven French wine perfect with seafood\n\nAre you looking for something specific like champagne or still wine?";
-    }
-    
-    if (lowerMessage.includes('budget') || lowerMessage.includes('cheap') || lowerMessage.includes('affordable')) {
-      return "Great wines don't have to break the bank! Here are some excellent value options:\n\n🍷 Under $30: Côtes du Rhône, Spanish Tempranillo\n🍷 Under $50: Oregon Pinot Noir, Chianti Classico\n🍾 Under $40: Cava, Crémant de Loire\n\nWhat's your ideal price range?";
-    }
-    
-    return "I'd be happy to help you find the perfect wine! Based on our curated collection, I can recommend wines for any occasion. Could you tell me more about:\n\n• What type of wine you prefer (red, white, sparkling)\n• The occasion or mood\n• Your budget range\n• Any food pairings you're considering\n\nThis will help me give you the most personalized recommendations!";
-  };
+  const renderChatMessage = ({ item }: { item: ChatMessage }) => (
+    <View style={[
+      styles.messageContainer,
+      item.isUser ? styles.userMessage : styles.aiMessage
+    ]}>
+      <Text style={[
+        styles.messageText,
+        item.isUser ? styles.userMessageText : styles.aiMessageText
+      ]}>
+        {item.text}
+      </Text>
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Wine Recommendations</Text>
-        <Text style={styles.subtitle}>Discover your perfect wine match</Text>
-      </View>
+      <LinearGradient
+        colors={['#722F37', '#8B4B47']}
+        style={styles.header}
+      >
+        <Text style={styles.headerTitle}>Wine Discovery</Text>
+        <Text style={styles.headerSubtitle}>Find your perfect wine match</Text>
+      </LinearGradient>
 
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'mood' && styles.activeTab]}
-          onPress={() => setActiveTab('mood')}
-        >
-          <Text style={[styles.tabText, activeTab === 'mood' && styles.activeTabText]}>
-            Mood & Occasion
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'chat' && styles.activeTab]}
-          onPress={() => setActiveTab('chat')}
-        >
-          <Text style={[styles.tabText, activeTab === 'chat' && styles.activeTabText]}>
-            AI Chat
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {activeTab === 'mood' ? (
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Mood Selection */}
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>How are you feeling?</Text>
-          <Text style={styles.sectionSubtitle}>Select a mood to get personalized wine recommendations</Text>
-
-          <View style={styles.moodsContainer}>
-            {moods.map((mood) => {
-              const IconComponent = mood.icon;
-              return (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={styles.moodContainer}>
+              {MOODS.map((mood) => (
                 <TouchableOpacity
-                  key={mood.id}
+                  key={mood.label}
                   style={[
                     styles.moodButton,
-                    selectedMood === mood.id && styles.selectedMoodButton,
+                    selectedMood === mood.label && styles.moodButtonActive
                   ]}
-                  onPress={() => handleMoodSelect(mood.id)}
+                  onPress={() => handleMoodSelect(mood.label)}
                 >
-                  <IconComponent 
-                    size={32} 
-                    color={selectedMood === mood.id ? '#FFFFFF' : mood.color} 
-                  />
-                  <Text
-                    style={[
-                      styles.moodText,
-                      selectedMood === mood.id && styles.selectedMoodText,
-                    ]}
-                  >
-                    {mood.name}
+                  <Text style={styles.moodEmoji}>{mood.emoji}</Text>
+                  <Text style={[
+                    styles.moodLabel,
+                    selectedMood === mood.label && styles.moodLabelActive
+                  ]}>
+                    {mood.label}
                   </Text>
                 </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {recommendations.length > 0 && (
-            <View style={styles.recommendationsContainer}>
-              <Text style={styles.recommendationsTitle}>Recommended for you:</Text>
-              {recommendations.map((rec, index) => (
-                <View key={index} style={styles.recommendationCard}>
-                  <Text style={styles.recommendationText}>{rec}</Text>
-                </View>
               ))}
             </View>
-          )}
-        </ScrollView>
-      ) : (
-        <KeyboardAvoidingView 
-          style={styles.chatContainer}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-        >
-          <ScrollView style={styles.messagesContainer} showsVerticalScrollIndicator={false}>
-            {chatMessages.length === 0 && (
-              <View style={styles.welcomeMessage}>
-                <MessageCircle size={48} color="#722F37" />
-                <Text style={styles.welcomeTitle}>Wine AI Assistant</Text>
-                <Text style={styles.welcomeText}>
-                  Ask me anything about wines! I can help you find the perfect bottle for any occasion, 
-                  food pairing, or budget.
-                </Text>
-              </View>
-            )}
-            
-            {chatMessages.map((message) => (
-              <View
-                key={message.id}
-                style={[
-                  styles.messageContainer,
-                  message.isUser ? styles.userMessage : styles.aiMessage,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.messageText,
-                    message.isUser ? styles.userMessageText : styles.aiMessageText,
-                  ]}
-                >
-                  {message.text}
-                </Text>
-              </View>
-            ))}
           </ScrollView>
+        </View>
 
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.messageInput}
-              value={currentMessage}
-              onChangeText={setCurrentMessage}
-              placeholder="Ask about wines, pairings, or recommendations..."
-              placeholderTextColor="#999"
-              multiline
-              maxLength={500}
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, !currentMessage.trim() && styles.sendButtonDisabled]}
-              onPress={handleSendMessage}
-              disabled={!currentMessage.trim()}
-            >
-              <Send size={20} color={currentMessage.trim() ? '#FFFFFF' : '#999'} />
-            </TouchableOpacity>
+        {/* Price Range Selection */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Budget Range</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={styles.priceContainer}>
+              {PRICE_RANGES.map((range) => (
+                <TouchableOpacity
+                  key={range.label}
+                  style={[
+                    styles.priceButton,
+                    selectedPriceRange?.label === range.label && styles.priceButtonActive
+                  ]}
+                  onPress={() => handlePriceRangeSelect(range)}
+                >
+                  <DollarSign size={16} color={selectedPriceRange?.label === range.label ? 'white' : '#722F37'} />
+                  <Text style={[
+                    styles.priceLabel,
+                    selectedPriceRange?.label === range.label && styles.priceLabelActive
+                  ]}>
+                    {range.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+
+        {/* Recommendations */}
+        {recommendations.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>
+              Recommended for you ({recommendations.length})
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.recommendationsContainer}>
+                {recommendations.map((wine) => (
+                  <View key={wine.id} style={styles.recommendationCard}>
+                    <WineCard wine={wine} />
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
           </View>
-        </KeyboardAvoidingView>
-      )}
+        )}
+
+        {/* AI Chat Assistant */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            <MessageCircle size={20} color="#722F37" style={{ marginRight: 8 }} />
+            Chat with Wine Assistant
+          </Text>
+          
+          <View style={styles.chatContainer}>
+            <FlatList
+              data={chatMessages}
+              renderItem={renderChatMessage}
+              keyExtractor={(item) => item.id}
+              style={styles.chatMessages}
+              showsVerticalScrollIndicator={false}
+            />
+            
+            <View style={styles.chatInputContainer}>
+              <TextInput
+                style={styles.chatInput}
+                placeholder="Ask about wines, budget, or occasions..."
+                placeholderTextColor="#8B5A5F"
+                value={chatInput}
+                onChangeText={setChatInput}
+                multiline
+                maxLength={200}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.sendButton,
+                  !chatInput.trim() && styles.sendButtonDisabled
+                ]}
+                onPress={handleSendMessage}
+                disabled={!chatInput.trim()}
+              >
+                <Send size={20} color={chatInput.trim() ? 'white' : '#8B5A5F'} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -244,201 +340,174 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingVertical: 30,
+    paddingTop: 50,
   },
-  title: {
-    fontSize: 32,
+  headerTitle: {
     fontFamily: 'PlayfairDisplay-Bold',
-    color: '#722F37',
-    marginBottom: 4,
+    fontSize: 28,
+    color: '#F5F5DC',
+    marginBottom: 5,
   },
-  subtitle: {
+  headerSubtitle: {
+    fontFamily: 'PlayfairDisplay-Regular',
     fontSize: 16,
-    color: '#666',
-    lineHeight: 22,
-  },
-  tabContainer: {
-    flexDirection: 'row',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    backgroundColor: '#E5E5E5',
-    borderRadius: 12,
-    padding: 4,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  activeTab: {
-    backgroundColor: '#722F37',
-  },
-  tabText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-  },
-  activeTabText: {
-    color: '#FFFFFF',
+    color: '#F5F5DC',
+    opacity: 0.9,
   },
   content: {
     flex: 1,
+  },
+  section: {
     paddingHorizontal: 20,
+    paddingVertical: 20,
   },
   sectionTitle: {
-    fontSize: 24,
     fontFamily: 'PlayfairDisplay-Bold',
-    color: '#333',
-    marginBottom: 8,
-  },
-  sectionSubtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 24,
-    lineHeight: 22,
-  },
-  moodsContainer: {
+    fontSize: 22,
+    color: '#722F37',
+    marginBottom: 15,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 32,
+    alignItems: 'center',
+  },
+  moodContainer: {
+    flexDirection: 'row',
+    paddingRight: 20,
   },
   moodButton: {
-    width: '47%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 15,
+    marginRight: 12,
+    minWidth: 80,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
   },
-  selectedMoodButton: {
+  moodButtonActive: {
+    backgroundColor: '#D4AF37',
+  },
+  moodEmoji: {
+    fontSize: 24,
+    marginBottom: 5,
+  },
+  moodLabel: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 12,
+    color: '#722F37',
+    textAlign: 'center',
+  },
+  moodLabelActive: {
+    color: 'white',
+    fontFamily: 'PlayfairDisplay-Bold',
+  },
+  priceContainer: {
+    flexDirection: 'row',
+    paddingRight: 20,
+  },
+  priceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 12,
+    marginRight: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  priceButtonActive: {
     backgroundColor: '#722F37',
   },
-  moodText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 8,
+  priceLabel: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 12,
+    color: '#722F37',
+    marginLeft: 4,
   },
-  selectedMoodText: {
-    color: '#FFFFFF',
+  priceLabelActive: {
+    color: 'white',
+    fontFamily: 'PlayfairDisplay-Bold',
   },
   recommendationsContainer: {
-    marginBottom: 32,
-  },
-  recommendationsTitle: {
-    fontSize: 20,
-    fontFamily: 'PlayfairDisplay-Bold',
-    color: '#333',
-    marginBottom: 16,
+    flexDirection: 'row',
+    paddingRight: 20,
   },
   recommendationCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#D4AF37',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  recommendationText: {
-    fontSize: 16,
-    color: '#333',
-    lineHeight: 22,
+    marginRight: 15,
   },
   chatContainer: {
-    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  messagesContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  welcomeMessage: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  welcomeTitle: {
-    fontSize: 24,
-    fontFamily: 'PlayfairDisplay-Bold',
-    color: '#722F37',
-    marginTop: 16,
-    marginBottom: 12,
-  },
-  welcomeText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 22,
-    paddingHorizontal: 20,
+  chatMessages: {
+    height: 300,
+    marginBottom: 15,
   },
   messageContainer: {
-    marginBottom: 12,
+    marginVertical: 5,
     maxWidth: '80%',
   },
   userMessage: {
     alignSelf: 'flex-end',
     backgroundColor: '#722F37',
-    borderRadius: 16,
-    borderBottomRightRadius: 4,
-    padding: 12,
+    borderRadius: 18,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
   },
   aiMessage: {
     alignSelf: 'flex-start',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderBottomLeftRadius: 4,
-    padding: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 18,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
   },
   messageText: {
-    fontSize: 16,
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 14,
     lineHeight: 20,
   },
   userMessageText: {
-    color: '#FFFFFF',
+    color: 'white',
   },
   aiMessageText: {
     color: '#333',
   },
-  inputContainer: {
+  chatInputContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
+    alignItems: 'flex-end',
     borderTopWidth: 1,
     borderTopColor: '#E5E5E5',
-    alignItems: 'flex-end',
+    paddingTop: 15,
   },
-  messageInput: {
+  chatInput: {
     flex: 1,
     borderWidth: 1,
     borderColor: '#E5E5E5',
     borderRadius: 20,
-    paddingHorizontal: 16,
+    paddingHorizontal: 15,
     paddingVertical: 10,
-    marginRight: 12,
+    marginRight: 10,
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 14,
     maxHeight: 100,
-    fontSize: 16,
   },
   sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     backgroundColor: '#722F37',
+    borderRadius: 20,
+    padding: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },

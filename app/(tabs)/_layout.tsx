@@ -1,34 +1,23 @@
 import { Tabs } from 'expo-router';
-import { Wine, Search, BookOpen, Users, User } from 'lucide-react-native';
+import * as LucideIcons from 'lucide-react-native';
+import { StyleSheet } from 'react-native';
 
 export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
+        tabBarStyle: styles.tabBar,
         tabBarActiveTintColor: '#722F37',
-        tabBarInactiveTintColor: '#999999',
-        tabBarStyle: {
-          backgroundColor: '#FFFFFF',
-          borderTopColor: '#E5E5E5',
-          borderTopWidth: 1,
-          paddingBottom: 8,
-          paddingTop: 8,
-          height: 88,
-        },
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '600',
-          marginTop: 4,
-        },
-      }}
-    >
+        tabBarInactiveTintColor: '#8B5A5F',
+        tabBarLabelStyle: styles.tabBarLabel,
+      }}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'Collection',
           tabBarIcon: ({ size, color }) => (
-            <Wine size={size} color={color} />
+            <LucideIcons.Wine size={size} color={color} />
           ),
         }}
       />
@@ -37,7 +26,7 @@ export default function TabLayout() {
         options={{
           title: 'Discover',
           tabBarIcon: ({ size, color }) => (
-            <Search size={size} color={color} />
+            <LucideIcons.Heart size={size} color={color} />
           ),
         }}
       />
@@ -46,7 +35,7 @@ export default function TabLayout() {
         options={{
           title: 'Library',
           tabBarIcon: ({ size, color }) => (
-            <BookOpen size={size} color={color} />
+            <LucideIcons.BookOpen size={size} color={color} />
           ),
         }}
       />
@@ -55,7 +44,7 @@ export default function TabLayout() {
         options={{
           title: 'Community',
           tabBarIcon: ({ size, color }) => (
-            <Users size={size} color={color} />
+            <LucideIcons.Users size={size} color={color} />
           ),
         }}
       />
@@ -64,10 +53,25 @@ export default function TabLayout() {
         options={{
           title: 'Profile',
           tabBarIcon: ({ size, color }) => (
-            <User size={size} color={color} />
+            <LucideIcons.User size={size} color={color} />
           ),
         }}
       />
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  tabBar: {
+    backgroundColor: '#F5F5DC',
+    borderTopColor: '#E5D5B7',
+    borderTopWidth: 1,
+    height: 85,
+    paddingBottom: 25,
+    paddingTop: 10,
+  },
+  tabBarLabel: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 12,
+  },
+});

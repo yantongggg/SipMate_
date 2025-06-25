@@ -1,279 +1,291 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
+  StyleSheet,
   FlatList,
+  SafeAreaView,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
+  Modal,
   Image,
   Linking,
 } from 'react-native';
-import { Search, Filter, X, ArrowUpDown } from 'lucide-react-native';
-import { Wine } from '@/types/wine';
-import { wineService } from '@/services/wineService';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Search, Filter, SlidersHorizontal } from 'lucide-react-native';
+import { useWine } from '@/contexts/WineContext';
 import WineCard from '@/components/WineCard';
-import { router } from 'expo-router';
+import { Database } from '@/lib/supabase';
 
-export default function WineCollectionScreen() {
-  const [wines, setWines] = useState<Wine[]>([]);
-  const [filteredWines, setFilteredWines] = useState<Wine[]>([]);
+type Wine = Database['public']['Tables']['wines']['Row'];
+
+const WINE_TYPES = ['all', 'red', 'white'];
+
+const SORT_OPTIONS = [
+  { label: 'Name A-Z', value: 'name_asc' },
+  { label: 'Name Z-A', value: 'name_desc' },
+  { label: 'Rating (High to Low)', value: 'rating_desc' },
+  { label: 'Rating (Low to High)', value: 'rating_asc' },
+  { label: 'Price (Low to High)', value: 'price_asc' },
+  { label: 'Price (High to Low)', value: 'price_desc' },
+  { label: 'Type', value: 'type' },
+];
+
+export default function CollectionScreen() {
+  const { wines, loading } = useWine();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedType, setSelectedType] = useState<'all' | 'red' | 'white'>('all');
-  const [minRating, setMinRating] = useState<number>(0);
-  const [sortBy, setSortBy] = useState<'name' | 'price_asc' | 'price_desc' | 'rating'>('name');
+  const [selectedType, setSelectedType] = useState('all');
+  const [sortBy, setSortBy] = useState('name_asc');
   const [showFilters, setShowFilters] = useState(false);
-  const [showSortOptions, setShowSortOptions] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    loadWines();
-  }, []);
-
-  useEffect(() => {
-    applyFilters();
-  }, [wines, searchQuery, selectedType, minRating, sortBy]);
-
-  const loadWines = async () => {
-    try {
-      const allWines = await wineService.getAllWines();
-      setWines(allWines);
-    } catch (error) {
-      console.error('Error loading wines:', error);
-    } finally {
-      setIsLoading(false);
-    }
+  const handleSortChange = (newSortValue: string) => {
+    console.log('=== SORTING DEBUG ===');
+    console.log('Previous sort:', sortBy);
+    console.log('New sort:', newSortValue);
+    console.log('Wines count before sort:', wines.length);
+    
+    setShowFilters(false);
+    setSortBy(newSortValue);
+    
+    console.log('Sort state updated to:', newSortValue);
   };
 
-  const applyFilters = async () => {
-    let filtered = wines;
+  const handleTypeChange = (newType: string) => {
+    console.log('=== TYPE FILTER DEBUG ===');
+    console.log('Previous type:', selectedType);
+    console.log('New type:', newType);
+    
+    setSelectedType(newType);
+    
+    console.log('Type filter updated to:', newType);
+  };
 
-    if (searchQuery) {
-      filtered = await wineService.searchWines(searchQuery);
+  const filteredAndSortedWines = useMemo(() => {
+    console.log('=== FILTERING AND SORTING ===');
+    console.log('Total wines:', wines.length);
+    console.log('Search query:', searchQuery);
+    console.log('Selected type:', selectedType);
+    console.log('Sort by:', sortBy);
+
+    let filtered = [...wines];
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(wine =>
+        wine.name.toLowerCase().includes(query) ||
+        wine.winery?.toLowerCase().includes(query) ||
+        wine.region?.toLowerCase().includes(query) ||
+        wine.type.toLowerCase().includes(query) ||
+        wine.food_pairing?.toLowerCase().includes(query)
+      );
+      console.log('After search filter:', filtered.length);
     }
 
+    // Apply type filter
     if (selectedType !== 'all') {
       filtered = filtered.filter(wine => wine.type === selectedType);
-    }
-
-    if (minRating > 0) {
-      filtered = filtered.filter(wine => wine.rating >= minRating);
+      console.log('After type filter:', filtered.length);
     }
 
     // Apply sorting
-    filtered = [...filtered].sort((a, b) => {
+    const sorted = filtered.sort((a, b) => {
       switch (sortBy) {
-        case 'price_asc':
-          return a.price - b.price;
-        case 'price_desc':
-          return b.price - a.price;
-        case 'rating':
-          return b.rating - a.rating;
-        case 'name':
-        default:
+        case 'name_asc':
           return a.name.localeCompare(b.name);
+        case 'name_desc':
+          return b.name.localeCompare(a.name);
+        case 'rating_desc':
+          return (b.rating || 0) - (a.rating || 0);
+        case 'rating_asc':
+          return (a.rating || 0) - (b.rating || 0);
+        case 'price_desc':
+          return (b.price || 0) - (a.price || 0);
+        case 'price_asc':
+          return (a.price || 0) - (b.price || 0);
+        case 'type':
+          return a.type.localeCompare(b.type);
+        default:
+          return 0;
       }
     });
 
-    setFilteredWines(filtered);
-  };
-
-  const clearFilters = () => {
-    setSearchQuery('');
-    setSelectedType('all');
-    setMinRating(0);
-    setSortBy('name');
-    setShowFilters(false);
-  };
-
-  const handleWinePress = (wine: Wine) => {
-    router.push({
-      pathname: '/wine-details',
-      params: { wineId: wine.id }
-    });
-  };
-
-  const handleWineSaved = async (wine: Wine) => {
-    // Refresh the wine list to update saved states
-    await loadWines();
-  };
-
-  const handleBoltPress = () => {
-    Linking.openURL('https://bolt.new/');
-  };
+    console.log('After sorting:', sorted.length);
+    return sorted;
+  }, [wines, searchQuery, selectedType, sortBy]);
 
   const renderWineCard = ({ item }: { item: Wine }) => (
-    <WineCard 
-      wine={item} 
-      onPress={() => handleWinePress(item)} 
-      onSave={handleWineSaved}
-    />
+    <WineCard wine={item} />
   );
 
-  const sortOptions = [
-    { key: 'name', label: 'Name (A-Z)' },
-    { key: 'price_asc', label: 'Price: Low to High' },
-    { key: 'price_desc', label: 'Price: High to Low' },
-    { key: 'rating', label: 'Rating: High to Low' },
-  ];
+  const handleBoltLogoPress = async () => {
+    try {
+      await Linking.openURL('https://bolt.new/');
+    } catch (error) {
+      console.error('Failed to open Bolt URL:', error);
+    }
+  };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <View style={styles.titleSection}>
-            <Text style={styles.title}>Wine Collection</Text>
-            <Text style={styles.subtitle}>Discover premium wines from around the world</Text>
-          </View>
+  const FilterModal = () => (
+    <Modal 
+      visible={showFilters} 
+      transparent 
+      animationType="slide"
+      onRequestClose={() => setShowFilters(false)}
+    >
+      <TouchableOpacity 
+        style={styles.modalOverlay}
+        activeOpacity={1}
+        onPress={() => {
+          console.log('Modal overlay pressed - closing');
+          setShowFilters(false);
+        }}
+      >
+        <TouchableOpacity 
+          style={styles.modalContent}
+          activeOpacity={1}
+          onPress={(e) => e.stopPropagation()}
+        >
+          <Text style={styles.modalTitle}>Filter & Sort</Text>
           
-          {/* Bolt.new Badge */}
-          <TouchableOpacity style={styles.boltBadge} onPress={handleBoltPress}>
-            <Image 
-              source={require('@/assets/images/white_circle_360x360.png')}
-              style={styles.boltImage}
-              resizeMode="contain"
-            />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <Search size={20} color="#666" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search wines, wineries, regions..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholderTextColor="#999"
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <X size={20} color="#666" />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        <TouchableOpacity
-          style={[styles.filterButton, showFilters && styles.filterButtonActive]}
-          onPress={() => setShowFilters(!showFilters)}
-        >
-          <Filter size={20} color={showFilters ? '#FFFFFF' : '#722F37'} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.filterButton, showSortOptions && styles.filterButtonActive]}
-          onPress={() => setShowSortOptions(!showSortOptions)}
-        >
-          <ArrowUpDown size={20} color={showSortOptions ? '#FFFFFF' : '#722F37'} />
-        </TouchableOpacity>
-      </View>
-
-      {showSortOptions && (
-        <View style={styles.sortContainer}>
-          <Text style={styles.sortTitle}>Sort by:</Text>
-          <View style={styles.sortOptions}>
-            {sortOptions.map((option) => (
+          <Text style={styles.sectionTitle}>Wine Type</Text>
+          <View style={styles.typeContainer}>
+            {WINE_TYPES.map((type) => (
               <TouchableOpacity
-                key={option.key}
+                key={type}
                 style={[
-                  styles.sortOption,
-                  sortBy === option.key && styles.sortOptionActive,
+                  styles.typeButton,
+                  selectedType === type && styles.typeButtonActive
                 ]}
                 onPress={() => {
-                  setSortBy(option.key as any);
-                  setShowSortOptions(false);
+                  console.log('Type button pressed:', type);
+                  handleTypeChange(type);
                 }}
               >
-                <Text
-                  style={[
-                    styles.sortOptionText,
-                    sortBy === option.key && styles.sortOptionTextActive,
-                  ]}
-                >
-                  {option.label}
+                <Text style={[
+                  styles.typeButtonText,
+                  selectedType === type && styles.typeButtonTextActive
+                ]}>
+                  {type.charAt(0).toUpperCase() + type.slice(1)}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
-        </View>
-      )}
 
-      {showFilters && (
-        <View style={styles.filtersContainer}>
-          <View style={styles.filterRow}>
-            <Text style={styles.filterLabel}>Type:</Text>
-            <View style={styles.typeFilters}>
-              {['all', 'red', 'white'].map((type) => (
-                <TouchableOpacity
-                  key={type}
-                  style={[
-                    styles.typeFilter,
-                    selectedType === type && styles.typeFilterActive,
-                  ]}
-                  onPress={() => setSelectedType(type as 'all' | 'red' | 'white')}
-                >
-                  <Text
-                    style={[
-                      styles.typeFilterText,
-                      selectedType === type && styles.typeFilterTextActive,
-                    ]}
-                  >
-                    {type.charAt(0).toUpperCase() + type.slice(1)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
+          <Text style={styles.sectionTitle}>Sort By</Text>
+          {SORT_OPTIONS.map((option) => (
+            <TouchableOpacity
+              key={option.value}
+              style={[
+                styles.sortOption,
+                sortBy === option.value && styles.sortOptionActive
+              ]}
+              onPress={() => {
+                console.log('Sort option pressed:', option.value, option.label);
+                handleSortChange(option.value);
+              }}
+            >
+              <Text style={[
+                styles.sortOptionText,
+                sortBy === option.value && styles.sortOptionTextActive
+              ]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
 
-          <View style={styles.filterRow}>
-            <Text style={styles.filterLabel}>Min Rating:</Text>
-            <View style={styles.ratingFilters}>
-              {[0, 3, 4, 4.5].map((rating) => (
-                <TouchableOpacity
-                  key={rating}
-                  style={[
-                    styles.ratingFilter,
-                    minRating === rating && styles.ratingFilterActive,
-                  ]}
-                  onPress={() => setMinRating(rating)}
-                >
-                  <Text
-                    style={[
-                      styles.ratingFilterText,
-                      minRating === rating && styles.ratingFilterTextActive,
-                    ]}
-                  >
-                    {rating === 0 ? 'Any' : `${rating}+`}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          <TouchableOpacity style={styles.clearFiltersButton} onPress={clearFilters}>
-            <Text style={styles.clearFiltersText}>Clear Filters</Text>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={() => {
+              console.log('Apply Filters pressed - closing modal');
+              setShowFilters(false);
+            }}
+          >
+            <Text style={styles.closeButtonText}>Apply Filters</Text>
           </TouchableOpacity>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <LinearGradient
+        colors={['#722F37', '#8B4B47']}
+        style={styles.header}
+      >
+        <Text style={styles.headerTitle}>Wine Collection</Text>
+        <Text style={styles.headerSubtitle}>Discover exceptional wines</Text>
+      </LinearGradient>
+
+      {/* Bolt Logo Button */}
+      <TouchableOpacity
+        style={styles.boltLogoButton}
+        onPress={handleBoltLogoPress}
+        activeOpacity={0.8}
+      >
+        <Image
+          source={require('@/assets/images/bolt_logo.png')}
+          style={styles.boltLogo}
+          resizeMode="contain"
+        />
+      </TouchableOpacity>
+
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color="#8B5A5F" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search wines, wineries, regions..."
+            placeholderTextColor="#8B5A5F"
+            value={searchQuery}
+            onChangeText={(text) => {
+              console.log('Search query changed:', text);
+              setSearchQuery(text);
+            }}
+          />
         </View>
-      )}
+        <TouchableOpacity
+          style={styles.filterButton}
+          onPress={() => {
+            console.log('Filter button pressed - opening modal');
+            setShowFilters(true);
+          }}
+        >
+          <SlidersHorizontal size={20} color="#722F37" />
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.resultsHeader}>
         <Text style={styles.resultsCount}>
-          {filteredWines.length} wine{filteredWines.length !== 1 ? 's' : ''}
+          {filteredAndSortedWines.length} wine{filteredAndSortedWines.length !== 1 ? 's' : ''}
         </Text>
+        {selectedType !== 'all' && (
+          <Text style={styles.activeFilter}>
+            Filtered by: {selectedType}
+          </Text>
+        )}
         <Text style={styles.sortIndicator}>
-          Sorted by: {sortOptions.find(opt => opt.key === sortBy)?.label}
+          Sorted by: {SORT_OPTIONS.find(opt => opt.value === sortBy)?.label || sortBy}
         </Text>
       </View>
 
       <FlatList
-        data={filteredWines}
+        data={filteredAndSortedWines}
         renderItem={renderWineCard}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={styles.wineList}
         showsVerticalScrollIndicator={false}
+        refreshing={loading}
+        onRefresh={() => {
+          console.log('Pull to refresh triggered');
+        }}
+        numColumns={2}
+        ItemSeparatorComponent={() => <View style={{ height: 0 }} />}
+        extraData={`${sortBy}-${selectedType}-${searchQuery}`}
       />
+
+      <FilterModal />
     </SafeAreaView>
   );
 }
@@ -285,225 +297,179 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingVertical: 30,
+    paddingTop: 50,
   },
-  headerContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#F5F5DC',
+    marginBottom: 5,
   },
-  titleSection: {
-    flex: 1,
-  },
-  title: {
-    fontSize: 32,
-    fontFamily: 'PlayfairDisplay-Bold',
-    color: '#722F37',
-    marginBottom: 4,
-  },
-  subtitle: {
+  headerSubtitle: {
     fontSize: 16,
-    color: '#666',
-    lineHeight: 22,
+    color: '#F5F5DC',
+    opacity: 0.9,
   },
-  boltBadge: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#FFFFFF',
+  boltLogoButton: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 1000,
+  },
+  boltLogo: {
+    width: 32,
+    height: 32,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    marginRight: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    marginLeft: 16,
-  },
-  boltImage: {
-    width: 50,
-    height: 50,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 16,
-    gap: 12,
-  },
-  searchInputContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
   },
   searchIcon: {
-    marginRight: 12,
+    marginRight: 10,
   },
   searchInput: {
     flex: 1,
-    paddingVertical: 16,
     fontSize: 16,
     color: '#333',
   },
   filterButton: {
-    width: 48,
-    height: 48,
+    backgroundColor: 'white',
+    padding: 12,
     borderRadius: 12,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
   },
-  filterButtonActive: {
-    backgroundColor: '#722F37',
+  resultsHeader: {
+    paddingHorizontal: 20,
+    paddingBottom: 10,
   },
-  sortContainer: {
-    backgroundColor: '#FFFFFF',
-    marginHorizontal: 20,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+  resultsCount: {
+    fontSize: 14,
+    color: '#8B5A5F',
+    fontWeight: '500',
   },
-  sortTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
+  activeFilter: {
+    fontSize: 12,
+    color: '#722F37',
+    marginTop: 2,
+    fontStyle: 'italic',
   },
-  sortOptions: {
-    gap: 8,
+  sortIndicator: {
+    fontSize: 12,
+    color: '#D4AF37',
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
+  wineList: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#722F37',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#722F37',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  typeContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  typeButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#D4AF37',
+  },
+  typeButtonActive: {
+    backgroundColor: '#D4AF37',
+  },
+  typeButtonText: {
+    fontSize: 14,
+    color: '#722F37',
+  },
+  typeButtonTextActive: {
+    color: 'white',
   },
   sortOption: {
-    paddingHorizontal: 16,
     paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 8,
-    backgroundColor: '#F8F8F8',
+    marginBottom: 8,
   },
   sortOptionActive: {
     backgroundColor: '#722F37',
   },
   sortOptionText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#666',
+    fontSize: 16,
+    color: '#722F37',
   },
   sortOptionTextActive: {
-    color: '#FFFFFF',
+    color: 'white',
   },
-  filtersContainer: {
-    backgroundColor: '#FFFFFF',
-    marginHorizontal: 20,
+  closeButton: {
+    backgroundColor: '#722F37',
+    paddingVertical: 15,
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    marginTop: 20,
   },
-  filterRow: {
-    marginBottom: 16,
-  },
-  filterLabel: {
+  closeButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  typeFilters: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  typeFilter: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
-    backgroundColor: '#FFFFFF',
-  },
-  typeFilterActive: {
-    backgroundColor: '#722F37',
-    borderColor: '#722F37',
-  },
-  typeFilterText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#666',
-  },
-  typeFilterTextActive: {
-    color: '#FFFFFF',
-  },
-  ratingFilters: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  ratingFilter: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
-    backgroundColor: '#FFFFFF',
-  },
-  ratingFilterActive: {
-    backgroundColor: '#722F37',
-    borderColor: '#722F37',
-  },
-  ratingFilterText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#666',
-  },
-  ratingFilterTextActive: {
-    color: '#FFFFFF',
-  },
-  clearFiltersButton: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  clearFiltersText: {
-    fontSize: 14,
-    color: '#722F37',
-    fontWeight: '600',
-  },
-  resultsHeader: {
-    paddingHorizontal: 20,
-    marginBottom: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  resultsCount: {
-    fontSize: 16,
-    color: '#666',
-    fontWeight: '500',
-  },
-  sortIndicator: {
-    fontSize: 14,
-    color: '#999',
-  },
-  listContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 100,
+    fontWeight: 'bold',
+    color: 'white',
+    textAlign: 'center',
   },
 });

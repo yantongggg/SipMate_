@@ -2,86 +2,145 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  StyleSheet,
+  SafeAreaView,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   Alert,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
+  ScrollView,
 } from 'react-native';
-import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Wine, X } from 'lucide-react-native';
+import { X, Wine, Eye, EyeOff } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 
-export default function AuthModal() {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+export default function AuthScreen() {
+  const router = useRouter();
+  const { signIn, signUp } = useAuth();
+  const [isLogin, setIsLogin] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  
+  // Form fields
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const { login, register } = useAuth();
+  
+  // Validation errors
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const handleClose = () => {
-    router.back();
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {};
+
+    if (!username.trim()) {
+      newErrors.username = 'Username is required';
+    } else if (username.length < 3) {
+      newErrors.username = 'Username must be at least 3 characters';
+    } else if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      newErrors.username = 'Username can only contain letters, numbers, and underscores';
+    }
+
+    if (!isLogin && !email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!isLogin && !email.includes('@')) {
+      newErrors.email = 'Please enter a valid email';
+    }
+
+    if (!password) {
+      newErrors.password = 'Password is required';
+    } else if (password.length < 6) {
+      newErrors.password = 'Password must be at least 6 characters';
+    }
+
+    if (!isLogin && !confirmPassword) {
+      newErrors.confirmPassword = 'Please confirm your password';
+    } else if (!isLogin && password !== confirmPassword) {
+      newErrors.confirmPassword = 'Passwords do not match';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
-  const handleLogin = async () => {
-    if (!username.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please fill in all fields');
+  const handleSubmit = async () => {
+    console.log('=== AUTH SUBMIT ===');
+    console.log('Mode:', isLogin ? 'Login' : 'Register');
+    console.log('Username:', username);
+    console.log('Email:', email);
+    
+    if (!validateForm()) {
+      console.log('Form validation failed:', errors);
       return;
     }
 
-    setIsLoading(true);
+    setLoading(true);
     try {
-      const result = await login(username, password);
-      if (result.success) {
-        router.back();
+      let result;
+      
+      if (isLogin) {
+        console.log('Attempting login...');
+        result = await signIn(username, password);
       } else {
-        Alert.alert('Login Failed', result.error || 'Invalid username or password');
+        console.log('Attempting registration...');
+        result = await signUp(username, email, password);
+      }
+
+      console.log('Auth result:', result);
+
+      if (result.error) {
+        console.log('Auth error:', result.error);
+        Alert.alert('Error', result.error);
+      } else {
+        console.log('Auth successful, navigating back...');
+        // Small delay to ensure state updates
+        setTimeout(() => {
+          router.back();
+        }, 100);
       }
     } catch (error) {
-      Alert.alert('Error', 'Login failed. Please try again.');
+      console.error('Auth catch error:', error);
+      Alert.alert('Error', 'An unexpected error occurred');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const handleRegister = async () => {
-    if (!username.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please fill in username and password');
-      return;
-    }
-
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters long');
-      return;
-    }
-
-    if (confirmPassword && password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
-      return;
-    }
-
-    setIsLoading(true);
+  const handleChangePassword = async (currentPassword: string, newPassword: string) => {
+    console.log('=== CHANGE PASSWORD ===');
+    
     try {
-      const result = await register(username.trim(), email.trim(), password);
-      if (result.success) {
-        Alert.alert('Success', 'Account created successfully!', [
-          {
-            text: 'OK',
-            onPress: () => router.back(),
-          },
-        ]);
-      } else {
-        Alert.alert('Registration Failed', result.error || 'Failed to create account');
+      // First, verify current password by attempting to sign in
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: `${username}@sipmate.app`, // Using your current auth pattern
+        password: currentPassword,
+      });
+
+      if (verifyError) {
+        throw new Error('Current password is incorrect');
       }
+
+      // Update password
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+
+      if (updateError) {
+        throw new Error(updateError.message);
+      }
+
+      console.log('Password updated successfully');
+      return { success: true };
     } catch (error) {
-      Alert.alert('Error', 'Registration failed. Please try again.');
-    } finally {
-      setIsLoading(false);
+      console.error('Password change error:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Failed to change password' 
+      };
     }
   };
 
@@ -90,124 +149,222 @@ export default function AuthModal() {
     setEmail('');
     setPassword('');
     setConfirmPassword('');
+    setErrors({});
+    setShowPassword(false);
+    setShowConfirmPassword(false);
   };
 
-  const switchMode = (newMode: 'login' | 'register') => {
-    setMode(newMode);
+  const switchMode = () => {
+    console.log('Switching auth mode from', isLogin ? 'login' : 'register', 'to', !isLogin ? 'login' : 'register');
+    setIsLogin(!isLogin);
     resetForm();
+  };
+
+  const handleClose = () => {
+    console.log('Closing auth screen');
+    router.back();
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
-        colors={['#F5F5DC', '#FFFFFF']}
-        style={styles.gradient}
+        colors={['#722F37', '#8B4B47']}
+        style={styles.header}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.keyboardView}
+        <TouchableOpacity
+          style={styles.closeButton}
+          onPress={handleClose}
         >
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-              <X size={24} color="#722F37" />
-            </TouchableOpacity>
+          <X size={24} color="white" />
+        </TouchableOpacity>
+        
+        <View style={styles.headerContent}>
+          <Wine size={40} color="#D4AF37" />
+          <Text style={styles.headerTitle}>
+            {isLogin ? 'Welcome Back' : 'Join SipMate'}
+          </Text>
+          <Text style={styles.headerSubtitle}>
+            {isLogin 
+              ? 'Sign in to continue your wine journey' 
+              : 'Start your wine discovery adventure'
+            }
+          </Text>
+        </View>
+      </LinearGradient>
+
+      <KeyboardAvoidingView 
+        style={styles.content}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView 
+          style={styles.form}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Username */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Username</Text>
+            <TextInput
+              style={[
+                styles.input,
+                errors.username && styles.inputError
+              ]}
+              value={username}
+              onChangeText={(text) => {
+                setUsername(text.toLowerCase().trim());
+                if (errors.username) {
+                  setErrors(prev => ({ ...prev, username: '' }));
+                }
+              }}
+              placeholder="Enter your username"
+              placeholderTextColor="#8B5A5F"
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={20}
+            />
+            {errors.username && (
+              <Text style={styles.errorText}>{errors.username}</Text>
+            )}
           </View>
 
-          <View style={styles.content}>
-            <View style={styles.titleSection}>
-              <Wine size={48} color="#722F37" />
-              <Text style={styles.title}>
-                {mode === 'login' ? 'Welcome Back' : 'Join SipMate'}
-              </Text>
-              <Text style={styles.subtitle}>
-                {mode === 'login' 
-                  ? 'Sign in to access your wine journey' 
-                  : 'Create your account to start exploring wines'
-                }
-              </Text>
-            </View>
-
-            <View style={styles.form}>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Username</Text>
-                <TextInput
-                  style={styles.input}
-                  value={username}
-                  onChangeText={setUsername}
-                  placeholder="Enter your username"
-                  placeholderTextColor="#999"
-                  autoCapitalize="none"
-                />
-              </View>
-
-              {mode === 'register' && (
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>Email (optional)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={email}
-                    onChangeText={setEmail}
-                    placeholder="Enter your email"
-                    placeholderTextColor="#999"
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                  />
-                </View>
-              )}
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Password</Text>
-                <TextInput
-                  style={styles.input}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder={mode === 'register' ? 'Create a password (min 6 characters)' : 'Enter your password'}
-                  placeholderTextColor="#999"
-                  secureTextEntry
-                />
-              </View>
-
-              {mode === 'register' && (
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>Confirm Password</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={confirmPassword}
-                    onChangeText={setConfirmPassword}
-                    placeholder="Confirm your password"
-                    placeholderTextColor="#999"
-                    secureTextEntry
-                  />
-                </View>
-              )}
-
-              <TouchableOpacity
-                style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
-                onPress={mode === 'login' ? handleLogin : handleRegister}
-                disabled={isLoading}
-              >
-                <Text style={styles.primaryButtonText}>
-                  {isLoading 
-                    ? (mode === 'login' ? 'Signing In...' : 'Creating Account...') 
-                    : (mode === 'login' ? 'Sign In' : 'Create Account')
+          {/* Email (Register only) */}
+          {!isLogin && (
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Email</Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  errors.email && styles.inputError
+                ]}
+                value={email}
+                onChangeText={(text) => {
+                  setEmail(text.toLowerCase().trim());
+                  if (errors.email) {
+                    setErrors(prev => ({ ...prev, email: '' }));
                   }
-                </Text>
-              </TouchableOpacity>
+                }}
+                placeholder="Enter your email"
+                placeholderTextColor="#8B5A5F"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {errors.email && (
+                <Text style={styles.errorText}>{errors.email}</Text>
+              )}
+            </View>
+          )}
 
-              <View style={styles.switchModeContainer}>
-                <Text style={styles.switchModeText}>
-                  {mode === 'login' ? "Don't have an account? " : "Already have an account? "}
-                </Text>
-                <TouchableOpacity onPress={() => switchMode(mode === 'login' ? 'register' : 'login')}>
-                  <Text style={styles.switchModeLink}>
-                    {mode === 'login' ? 'Sign Up' : 'Sign In'}
-                  </Text>
+          {/* Password */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>Password</Text>
+            <View style={styles.passwordContainer}>
+              <TextInput
+                style={[
+                  styles.passwordInput,
+                  errors.password && styles.inputError
+                ]}
+                value={password}
+                onChangeText={(text) => {
+                  setPassword(text);
+                  if (errors.password) {
+                    setErrors(prev => ({ ...prev, password: '' }));
+                  }
+                }}
+                placeholder="Enter your password"
+                placeholderTextColor="#8B5A5F"
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? (
+                  <EyeOff size={20} color="#8B5A5F" />
+                ) : (
+                  <Eye size={20} color="#8B5A5F" />
+                )}
+              </TouchableOpacity>
+            </View>
+            {errors.password && (
+              <Text style={styles.errorText}>{errors.password}</Text>
+            )}
+          </View>
+
+          {/* Confirm Password (Register only) */}
+          {!isLogin && (
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>Confirm Password</Text>
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  style={[
+                    styles.passwordInput,
+                    errors.confirmPassword && styles.inputError
+                  ]}
+                  value={confirmPassword}
+                  onChangeText={(text) => {
+                    setConfirmPassword(text);
+                    if (errors.confirmPassword) {
+                      setErrors(prev => ({ ...prev, confirmPassword: '' }));
+                    }
+                  }}
+                  placeholder="Confirm your password"
+                  placeholderTextColor="#8B5A5F"
+                  secureTextEntry={!showConfirmPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff size={20} color="#8B5A5F" />
+                  ) : (
+                    <Eye size={20} color="#8B5A5F" />
+                  )}
                 </TouchableOpacity>
               </View>
+              {errors.confirmPassword && (
+                <Text style={styles.errorText}>{errors.confirmPassword}</Text>
+              )}
             </View>
+          )}
+
+          {/* Submit Button */}
+          <TouchableOpacity
+            style={[
+              styles.submitButton,
+              loading && styles.submitButtonDisabled
+            ]}
+            onPress={handleSubmit}
+            disabled={loading}
+          >
+            <Text style={styles.submitButtonText}>
+              {loading 
+                ? (isLogin ? 'Signing In...' : 'Creating Account...') 
+                : (isLogin ? 'Sign In' : 'Create Account')
+              }
+            </Text>
+          </TouchableOpacity>
+
+        
+
+          {/* Switch Mode */}
+          <View style={styles.switchContainer}>
+            <Text style={styles.switchText}>
+              {isLogin ? "Don't have an account? " : "Already have an account? "}
+            </Text>
+            <TouchableOpacity onPress={switchMode}>
+              <Text style={styles.switchLink}>
+                {isLogin ? 'Sign Up' : 'Sign In'}
+              </Text>
+            </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
-      </LinearGradient>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -215,113 +372,158 @@ export default function AuthModal() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
-  keyboardView: {
-    flex: 1,
+    backgroundColor: '#F5F5DC',
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingVertical: 30,
+    paddingTop: 50,
+    position: 'relative',
   },
   closeButton: {
-    width: 44,
-    height: 44,
-    justifyContent: 'center',
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 1,
+    padding: 8,
+  },
+  headerContent: {
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 22,
+    paddingTop: 20,
+  },
+  headerTitle: {
+    fontFamily: 'PlayfairDisplay-Bold',
+    fontSize: 28,
+    color: '#F5F5DC',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  headerSubtitle: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 16,
+    color: '#F5F5DC',
+    opacity: 0.9,
+    textAlign: 'center',
+  },
+  content: {
+    flex: 1,
+  },
+  form: {
+    flex: 1,
+    padding: 20,
+  },
+  inputContainer: {
+    marginBottom: 20,
+  },
+  inputLabel: {
+    fontFamily: 'PlayfairDisplay-Bold',
+    fontSize: 16,
+    color: '#722F37',
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 32,
+  inputError: {
+    borderColor: '#DC3545',
   },
-  titleSection: {
-    alignItems: 'center',
-    marginBottom: 48,
+  passwordContainer: {
+    position: 'relative',
   },
-  title: {
-    fontSize: 32,
-    fontFamily: 'PlayfairDisplay-Bold',
-    color: '#722F37',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  form: {
-    width: '100%',
-  },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
+  passwordInput: {
+    backgroundColor: 'white',
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 14,
+    paddingRight: 50,
+    fontFamily: 'PlayfairDisplay-Regular',
     fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  primaryButton: {
+  eyeButton: {
+    position: 'absolute',
+    right: 16,
+    top: 14,
+    padding: 4,
+  },
+  errorText: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 14,
+    color: '#DC3545',
+    marginTop: 6,
+  },
+  submitButton: {
     backgroundColor: '#722F37',
     borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: 'center',
-    marginTop: 8,
-    shadowColor: '#722F37',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
+    paddingVertical: 16,
+    marginTop: 10,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
   },
-  buttonDisabled: {
-    opacity: 0.7,
+  submitButtonDisabled: {
+    opacity: 0.6,
   },
-  primaryButtonText: {
-    color: '#FFFFFF',
+  submitButtonText: {
+    fontFamily: 'PlayfairDisplay-Bold',
     fontSize: 18,
-    fontWeight: '600',
+    color: 'white',
+    textAlign: 'center',
   },
-  switchModeContainer: {
+  testAccountInfo: {
+    backgroundColor: '#FFF8E1',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#D4AF37',
+  },
+  testAccountTitle: {
+    fontFamily: 'PlayfairDisplay-Bold',
+    fontSize: 14,
+    color: '#722F37',
+    marginBottom: 4,
+  },
+  testAccountText: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 12,
+    color: '#8B5A5F',
+  },
+  switchContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 32,
+    paddingBottom: 30,
   },
-  switchModeText: {
+  switchText: {
+    fontFamily: 'PlayfairDisplay-Regular',
     fontSize: 16,
-    color: '#666',
+    color: '#8B5A5F',
   },
-  switchModeLink: {
+  switchLink: {
+    fontFamily: 'PlayfairDisplay-Bold',
     fontSize: 16,
     color: '#722F37',
-    fontWeight: '600',
   },
 });

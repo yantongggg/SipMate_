@@ -1,370 +1,365 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
-  Image,
-  TouchableOpacity,
   StyleSheet,
+  TouchableOpacity,
+  Image,
+  Dimensions,
   Alert,
 } from 'react-native';
-import { Bookmark, Star } from 'lucide-react-native';
-import { Wine, SavedWine } from '@/types/wine';
-import { wineService } from '@/services/wineService';
-import { useAuthGuard } from '@/hooks/useAuthGuard';
+import { useRouter } from 'expo-router';
+import { Heart, Star } from 'lucide-react-native';
+import { useAuth } from '@/contexts/AuthContext';
 import { useWine } from '@/contexts/WineContext';
-import SaveWineModal from './SaveWineModal';
+
+// Fixed image URL function with fallbacks
+const getWineImageUrl = (imageName: string | null, wineType?: string): string => {
+  // Random wine images for fallback
+  const fallbackImages = [
+    'https://images.unsplash.com/photo-1586370434639-0fe43b2d32d6?w=400&h=600&fit=crop', // Red wine bottle
+    'https://images.unsplash.com/photo-1510812431401-41d2bd2722f3?w=400&h=600&fit=crop', // Wine glasses
+    'https://images.unsplash.com/photo-1547595628-c61a29f496f0?w=400&h=600&fit=crop', // Wine bottle and glass
+    'https://images.unsplash.com/photo-1569529465841-dfecdab7503b?w=400&h=600&fit=crop', // Wine collection
+    'https://images.unsplash.com/photo-1528823872057-9c018a7a7553?w=400&h=600&fit=crop', // Elegant wine
+  ];
+
+  if (!imageName) {
+    // Return random fallback image
+    const randomIndex = Math.floor(Math.random() * fallbackImages.length);
+    return fallbackImages[randomIndex];
+  }
+  
+  // If the imageName already includes the folder path, use it directly
+  if (imageName.includes('/')) {
+    const baseUrl = 'https://gcvtaawcowvtytbsnftq.supabase.co/storage/v1/object/public';
+    return `${baseUrl}/wine-images/${imageName}`;
+  }
+  
+  // Otherwise, determine folder based on wine type
+  const folder = (wineType === 'white') ? 'whitewine_png' : 'redwine_png';
+  const baseUrl = 'https://gcvtaawcowvtytbsnftq.supabase.co/storage/v1/object/public';
+  const imageUrl = `${baseUrl}/wine-images/${folder}/${imageName}`;
+  
+  return imageUrl;
+};
+
+type Wine = {
+  id: string;
+  name: string;
+  type: string;
+  winery?: string;
+  region?: string;
+  year?: number;
+  price?: number;
+  rating?: number;
+  wine_image_name?: string;
+};
 
 interface WineCardProps {
   wine: Wine;
-  onSave?: (wine: Wine) => void;
-  onRemove?: (wine: Wine) => void;
-  onPress?: () => void;
-  showSaveDate?: boolean;
-  dateSaved?: string;
-  dateTried?: string;
-  userRating?: number;
-  userNotes?: string;
 }
 
-export default function WineCard({ 
-  wine, 
-  onSave, 
-  onRemove, 
-  onPress, 
-  showSaveDate = false,
-  dateSaved,
-  dateTried,
-  userRating,
-  userNotes
-}: WineCardProps) {
-  const [isLoading, setIsLoading] = useState(false);
+const { width } = Dimensions.get('window');
+const cardWidth = (width - 60) / 2; // Better spacing: 20px margins + 20px gap
+
+export default function WineCard({ wine }: WineCardProps) {
+  const router = useRouter();
+  const { user } = useAuth();
+  const { isWineSaved, saveWine, unsaveWine, refreshSavedWines } = useWine();
+  const [isSaved, setIsSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [imageError, setImageError] = useState(false);
-  const [showSaveModal, setShowSaveModal] = useState(false);
-  const { requireAuth, isAuthenticated } = useAuthGuard();
-  const { isWineSaved, addSavedWine, removeSavedWine } = useWine();
 
-  const isSaved = isWineSaved(wine.id);
+  // Check if wine is saved when component mounts or wine changes
+  useEffect(() => {
+    if (user && wine.id) {
+      const savedStatus = isWineSaved(wine.id);
+      setIsSaved(savedStatus);
+      console.log(`Wine ${wine.name} is saved:`, savedStatus);
+    } else {
+      setIsSaved(false);
+    }
+  }, [wine.id, user, isWineSaved]);
 
-  const handleSave = async () => {
-    requireAuth(() => {
-      if (isSaved) {
-        // If already saved, remove it
-        handleRemove();
-      } else {
-        // If not saved, show save modal
-        setShowSaveModal(true);
-      }
+  const handlePress = () => {
+    console.log('Wine card pressed:', wine.id);
+    router.push({
+      pathname: '/wine-details',
+      params: { id: wine.id }
     });
   };
 
-  const handleRemove = async () => {
-    setIsLoading(true);
-    try {
-      await wineService.removeSavedWine(wine.id);
-      removeSavedWine(wine.id);
-      onRemove?.(wine);
-      Alert.alert('Removed', `${wine.name} removed from your library`);
-    } catch (error) {
-      console.error('Error removing wine:', error);
-      Alert.alert('Error', 'Failed to remove wine');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const handleSave = async () => {
+    console.log('=== SAVE BUTTON PRESSED ===');
+    console.log('Wine:', wine.name);
+    console.log('User:', user?.id);
+    console.log('Currently saved:', isSaved);
 
-  const handleSaveWithDetails = async (wineData: {
-    wine: Wine;
-    userRating?: number;
-    userNotes?: string;
-    dateTried?: string;
-  }) => {
-    setIsLoading(true);
-    try {
-      await wineService.saveWineWithDetails(
-        wineData.wine,
-        wineData.userRating,
-        wineData.userNotes,
-        wineData.dateTried
+    if (!user) {
+      console.log('No user logged in, redirecting to auth');
+      Alert.alert(
+        'Sign In Required',
+        'Please sign in to save wines to your library',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Sign In', onPress: () => router.push('/auth') }
+        ]
       );
-      
-      // Create SavedWine object for context
-      const savedWine: SavedWine = {
-        ...wineData.wine,
-        dateSaved: new Date().toISOString(),
-        dateTried: wineData.dateTried,
-        userRating: wineData.userRating,
-        userNotes: wineData.userNotes
-      };
-      
-      addSavedWine(savedWine);
-      onSave?.(wine);
-      Alert.alert('Saved', `${wine.name} added to your library`);
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      if (isSaved) {
+        // Unsave the wine
+        console.log('Unsaving wine...');
+        const result = await unsaveWine(wine.id);
+        
+        if (result.error) {
+          console.error('Unsave error:', result.error);
+          Alert.alert('Error', 'Failed to remove wine from library');
+        } else {
+          console.log('Wine unsaved successfully');
+          setIsSaved(false);
+          await refreshSavedWines();
+        }
+      } else {
+        // Save the wine - Use correct function signature
+        console.log('Saving wine...');
+        const result = await saveWine(wine.id, {
+          rating: undefined,
+          date_tried: undefined,
+          location: undefined,
+          user_notes: undefined,
+        });
+        
+        if (result.error) {
+          console.error('Save error:', result.error);
+          Alert.alert('Error', 'Failed to save wine to library');
+        } else {
+          console.log('Wine saved successfully');
+          setIsSaved(true);
+          await refreshSavedWines();
+        }
+      }
     } catch (error) {
-      console.error('Error saving wine:', error);
-      throw error; // Let the modal handle the error
+      console.error('Save/unsave catch error:', error);
+      Alert.alert('Error', 'An unexpected error occurred');
     } finally {
-      setIsLoading(false);
+      setSaving(false);
     }
   };
 
-  const getImageSource = () => {
-    if (imageError) {
-      return { uri: wineService.getFallbackImageUrl(wine.type) };
-    }
-    return { uri: wineService.getWineImageUrl(wine.wineImageName, wine.type) };
-  };
+  const wineImageUrl = getWineImageUrl(wine.wine_image_name, wine.type);
 
   const handleImageError = () => {
-    console.log('Image failed to load for wine:', wine.name);
+    console.log('Image failed to load:', wineImageUrl);
     setImageError(true);
   };
 
-  const formatDate = (dateString: string) => {
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-      });
-    } catch (error) {
-      return dateString;
-    }
+  // Get fallback image if main image fails
+  const getFallbackImage = () => {
+    const fallbackImages = [
+      'https://images.unsplash.com/photo-1586370434639-0fe43b2d32d6?w=400&h=600&fit=crop',
+      'https://images.unsplash.com/photo-1510812431401-41d2bd2722f3?w=400&h=600&fit=crop',
+      'https://images.unsplash.com/photo-1547595628-c61a29f496f0?w=400&h=600&fit=crop',
+    ];
+    const randomIndex = Math.floor(Math.random() * fallbackImages.length);
+    return fallbackImages[randomIndex];
+  };
+
+  // Helper function to build wine details text safely
+  const buildWineDetailsText = () => {
+    const parts = [];
+    if (wine.type) parts.push(wine.type);
+    if (wine.region) parts.push(wine.region);
+    if (wine.winery) parts.push(wine.winery);
+    return parts.join(', ');
   };
 
   return (
-    <>
-      <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
+    <View style={styles.container}>
+      <TouchableOpacity onPress={handlePress} style={styles.card}>
         <View style={styles.imageContainer}>
-          <Image 
-            source={getImageSource()}
+          <Image
+            source={{ 
+              uri: imageError ? getFallbackImage() : wineImageUrl
+            }}
             style={styles.image}
+            resizeMode="cover"
             onError={handleImageError}
-            defaultSource={{ uri: wineService.getFallbackImageUrl(wine.type) }}
+            onLoad={() => console.log('✅ Image loaded successfully')}
           />
+          
+          {/* Save Button - Positioned over image */}
           <TouchableOpacity
-            style={[styles.saveButton, isSaved && styles.saveButtonActive]}
+            style={[
+              styles.saveButton,
+              isSaved && styles.saveButtonActive,
+              saving && styles.saveButtonSaving
+            ]}
             onPress={handleSave}
-            disabled={isLoading}
+            disabled={saving}
           >
-            <Bookmark 
-              size={20} 
-              color={isSaved ? '#FFFFFF' : '#722F37'} 
-              fill={isSaved ? '#FFFFFF' : 'transparent'}
+            <Heart
+              size={14}
+              color={isSaved ? '#fff' : '#D4AF37'}
+              fill={isSaved ? '#fff' : 'none'}
             />
           </TouchableOpacity>
         </View>
-
+        
         <View style={styles.content}>
-          <Text style={styles.name} numberOfLines={2}>{wine.name}</Text>
-          <Text style={styles.winery} numberOfLines={1}>{wine.winery}</Text>
-          <Text style={styles.region} numberOfLines={1}>{wine.region}</Text>
+          <Text style={styles.name} numberOfLines={2}>
+            {wine.name || 'Unknown Wine'}
+          </Text>
           
-          <View style={styles.details}>
-            <View style={styles.ratingContainer}>
-              <Star size={16} color="#D4AF37" fill="#D4AF37" />
-              <Text style={styles.rating}>{wine.rating}</Text>
-            </View>
-            <Text style={styles.price}>${wine.price}</Text>
-          </View>
-
-          <Text style={styles.alcohol}>{wine.alcoholPercentage}% ABV</Text>
-          <Text style={styles.pairing} numberOfLines={2}>{wine.foodPairing}</Text>
-          <Text style={styles.description} numberOfLines={3}>{wine.description}</Text>
-
-          {/* Show save dates and user data when in library view */}
-          {showSaveDate && (
-            <View style={styles.libraryInfo}>
-              {dateSaved && (
-                <View style={styles.dateRow}>
-                  <Text style={styles.dateLabel}>Saved:</Text>
-                  <Text style={styles.dateText}>{formatDate(dateSaved)}</Text>
-                </View>
-              )}
-              {dateTried && (
-                <View style={styles.dateRow}>
-                  <Text style={styles.dateLabel}>Tried:</Text>
-                  <Text style={styles.dateText}>{formatDate(dateTried)}</Text>
-                </View>
-              )}
-              {userRating && (
-                <View style={styles.ratingRow}>
-                  <Text style={styles.dateLabel}>Your Rating:</Text>
-                  <View style={styles.userRatingContainer}>
-                    <Star size={14} color="#D4AF37" fill="#D4AF37" />
-                    <Text style={styles.userRatingText}>{userRating}/5</Text>
-                  </View>
-                </View>
-              )}
-              {userNotes && (
-                <View style={styles.notesContainer}>
-                  <Text style={styles.notesLabel}>Your Notes:</Text>
-                  <Text style={styles.notesText} numberOfLines={3}>{userNotes}</Text>
-                </View>
-              )}
-            </View>
+          {wine.winery && (
+            <Text style={styles.winery} numberOfLines={1}>
+              {wine.winery}
+            </Text>
           )}
+          
+          {wine.region && (
+            <Text style={styles.region} numberOfLines={1}>
+              {wine.region}
+            </Text>
+          )}
+          
+          <View style={styles.bottomRow}>
+            <View style={styles.leftInfo}>
+              {wine.year && (
+                <Text style={styles.year}>{wine.year.toString()}</Text>
+              )}
+              
+              {wine.price && (
+                <Text style={styles.price}>
+                  ${wine.price.toString()}
+                </Text>
+              )}
+            </View>
+
+            {/* Rating display - Fixed to use proper Text wrapping */}
+            {wine.rating && (
+              <View style={styles.ratingContainer}>
+                <View style={styles.ratingContent}>
+                  <Star size={12} color="#D4AF37" fill="#D4AF37" />
+                  <Text style={styles.rating}>{wine.rating}</Text>
+                </View>
+              </View>
+            )}
+          </View>
         </View>
       </TouchableOpacity>
-
-      <SaveWineModal
-        visible={showSaveModal}
-        wine={wine}
-        onClose={() => setShowSaveModal(false)}
-        onSave={handleSaveWithDetails}
-      />
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    width: cardWidth,
+    marginBottom: 16,
+    marginHorizontal: 4, // Small horizontal margin for spacing
+  },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'white',
     borderRadius: 16,
-    marginBottom: 20,
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.12,
     shadowRadius: 8,
-    elevation: 4,
-    overflow: 'hidden',
+    elevation: 6,
   },
   imageContainer: {
     position: 'relative',
-    height: 200,
-    backgroundColor: '#F8F8F8',
+    width: '100%',
+    height: 180, // Slightly increased height
   },
   image: {
     width: '100%',
     height: '100%',
-    resizeMode: 'cover',
-  },
-  saveButton: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  saveButtonActive: {
-    backgroundColor: '#722F37',
   },
   content: {
-    padding: 16,
+    padding: 14, // Slightly increased padding
   },
   name: {
-    fontSize: 20,
-    fontFamily: 'PlayfairDisplay-Bold',
-    color: '#333',
+    fontSize: 15, // Slightly smaller font
+    fontWeight: 'bold',
     marginBottom: 4,
-    lineHeight: 26,
+    color: '#722F37',
+    lineHeight: 19,
   },
   winery: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: 13,
+    color: '#8B5A5F',
     marginBottom: 2,
+    fontStyle: 'italic',
   },
   region: {
-    fontSize: 14,
+    fontSize: 11,
     color: '#888',
-    marginBottom: 12,
-  },
-  details: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     marginBottom: 8,
   },
+  bottomRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+  },
+  leftInfo: {
+    flex: 1,
+  },
+  year: {
+    fontSize: 11,
+    color: '#888',
+    marginBottom: 2,
+  },
+  price: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#D4AF37',
+  },
   ratingContainer: {
+    backgroundColor: '#F8F9FA',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  ratingContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   rating: {
-    fontSize: 16,
+    fontSize: 11,
     fontWeight: '600',
-    color: '#333',
-    marginLeft: 4,
-  },
-  price: {
-    fontSize: 18,
-    fontWeight: '700',
     color: '#722F37',
+    marginLeft: 2,
   },
-  alcohol: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 8,
-  },
-  pairing: {
-    fontSize: 14,
-    color: '#722F37',
-    fontWeight: '500',
-    marginBottom: 8,
-    lineHeight: 18,
-  },
-  description: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-  },
-  libraryInfo: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-  },
-  dateRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  saveButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderWidth: 1,
+    borderColor: '#D4AF37',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  ratingRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
+  saveButtonActive: {
+    backgroundColor: '#D4AF37',
+    borderColor: '#D4AF37',
   },
-  dateLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
-  },
-  dateText: {
-    fontSize: 12,
-    color: '#333',
-  },
-  userRatingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  userRatingText: {
-    fontSize: 12,
-    color: '#333',
-    marginLeft: 4,
-  },
-  notesContainer: {
-    marginTop: 8,
-  },
-  notesLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 4,
-  },
-  notesText: {
-    fontSize: 12,
-    color: '#333',
-    lineHeight: 16,
-    fontStyle: 'italic',
+  saveButtonSaving: {
+    opacity: 0.6,
   },
 });

@@ -1,150 +1,207 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
-  FlatList,
-  TouchableOpacity,
   StyleSheet,
+  FlatList,
   SafeAreaView,
+  TouchableOpacity,
+  Alert,
   RefreshControl,
 } from 'react-native';
-import { BookOpen, LogIn } from 'lucide-react-native';
-import { SavedWine } from '@/types/wine';
-import { useAuth } from '@/contexts/AuthContext';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BookOpen, Star, Calendar, MapPin, Trash2, DollarSign } from 'lucide-react-native';
 import { useWine } from '@/contexts/WineContext';
-import { router } from 'expo-router';
-import WineCard from '@/components/WineCard';
+import { useAuth } from '@/contexts/AuthContext';
+import { useRouter } from 'expo-router';
 
 export default function LibraryScreen() {
-  const [stats, setStats] = useState({ total: 0, red: 0, white: 0 });
   const { user } = useAuth();
-  const { savedWines, isLoading, refreshSavedWines, removeSavedWine } = useWine();
+  const { savedWines, loading, unsaveWine, refreshSavedWines } = useWine();
+  const [refreshing, setRefreshing] = useState(false);
+  const router = useRouter();
 
-  useEffect(() => {
-    // Update stats whenever savedWines changes
-    const redCount = savedWines.filter(wine => wine.type === 'red').length;
-    const whiteCount = savedWines.filter(wine => wine.type === 'white').length;
-    
-    setStats({
-      total: savedWines.length,
-      red: redCount,
-      white: whiteCount,
-    });
-  }, [savedWines]);
-
-  const onRefresh = async () => {
+  const handleRefresh = async () => {
+    setRefreshing(true);
     await refreshSavedWines();
+    setRefreshing(false);
   };
 
-  const handleWineRemoved = async (wine: SavedWine) => {
-    // The wine is already removed from context by WineCard
-    // Just update local stats
-    const newTotal = stats.total - 1;
-    const newRed = wine.type === 'red' ? stats.red - 1 : stats.red;
-    const newWhite = wine.type === 'white' ? stats.white - 1 : stats.white;
-    
-    setStats({
-      total: newTotal,
-      red: newRed,
-      white: newWhite,
-    });
+  const handleUnsave = (wineId: string, wineName: string) => {
+    Alert.alert(
+      'Remove from Library',
+      `Are you sure you want to remove "${wineName}" from your library?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            const result = await unsaveWine(wineId);
+            if (result.error) {
+              Alert.alert('Error', result.error);
+            }
+          },
+        },
+      ]
+    );
   };
 
-  const handleWinePress = (wine: SavedWine) => {
+  const handleWinePress = (wineId: string) => {
     router.push({
       pathname: '/wine-details',
-      params: { wineId: wine.id }
+      params: { id: wineId }
     });
   };
 
-  const handleLoginPress = () => {
-    router.push('/auth');
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'No date recorded';
+    return new Date(dateString).toLocaleDateString();
   };
 
-  const renderStatsCard = () => (
-    <View style={styles.statsContainer}>
-      <View style={styles.statsCard}>
-        <Text style={styles.statsNumber}>{stats.total}</Text>
-        <Text style={styles.statsLabel}>Total Wines</Text>
+  const renderStars = (rating: number | null) => {
+    if (!rating) return null;
+    return (
+      <View style={styles.starsContainer}>
+        {[1, 2, 3, 4, 5].map((star) => (
+          <Star
+            key={star}
+            size={12}
+            color="#D4AF37"
+            fill={star <= rating ? '#D4AF37' : 'none'}
+          />
+        ))}
       </View>
-      <View style={styles.statsCard}>
-        <Text style={[styles.statsNumber, { color: '#722F37' }]}>{stats.red}</Text>
-        <Text style={styles.statsLabel}>Red Wines</Text>
+    );
+  };
+
+  const renderSavedWine = ({ item }: { item: any }) => (
+    <TouchableOpacity
+      style={styles.wineCard}
+      onPress={() => handleWinePress(item.wine_id)}
+    >
+      <View style={styles.wineCardContent}>
+        <View style={styles.wineInfo}>
+          <Text style={styles.wineName} numberOfLines={2}>
+            {item.wine.name}
+          </Text>
+
+          {(item.wine.type || item.wine.winery) && (
+            <View style={styles.wineDetails}>
+              <Text style={styles.wineType}>
+                {[item.wine.type, item.wine.winery].filter(Boolean).join(' • ')}
+              </Text>
+            </View>
+          )}
+
+          {(item.wine.region || item.wine.year) && (
+            <View style={styles.wineDetails}>
+              <Text style={styles.wineType}>
+                {[item.wine.region, item.wine.year].filter(Boolean).join(' • ')}
+              </Text>
+            </View>
+          )}
+
+          {item.wine.price && (
+            <View style={styles.priceRow}>
+              <DollarSign size={14} color="#8B5A5F" />
+              <Text style={styles.priceText}>${item.wine.price}</Text>
+            </View>
+          )}
+
+          {item.rating && renderStars(item.rating)}
+
+          <View style={styles.savedDetails}>
+            {item.date_tried && (
+              <View style={styles.detailRow}>
+                <Calendar size={14} color="#8B5A5F" />
+                <Text style={styles.detailText}>
+                  {formatDate(item.date_tried)}
+                </Text>
+              </View>
+            )}
+
+            {item.location && (
+              <View style={styles.detailRow}>
+                <MapPin size={14} color="#8B5A5F" />
+                <Text style={styles.detailText} numberOfLines={1}>
+                  {item.location}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {item.user_notes && (
+            <Text style={styles.description} numberOfLines={3}>
+              {item.user_notes}
+            </Text>
+          )}
+        </View>
+
+        <TouchableOpacity
+          style={styles.unsaveButton}
+          onPress={() => handleUnsave(item.wine_id, item.wine.name)}
+        >
+          <Trash2 size={18} color="#DC3545" />
+        </TouchableOpacity>
       </View>
-      <View style={styles.statsCard}>
-        <Text style={[styles.statsNumber, { color: '#D4AF37' }]}>{stats.white}</Text>
-        <Text style={styles.statsLabel}>White Wines</Text>
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 
-  const renderWineCard = ({ item }: { item: SavedWine }) => (
-    <WineCard 
-      wine={item} 
-      onPress={() => handleWinePress(item)}
-      onRemove={handleWineRemoved}
-      showSaveDate={true}
-      dateSaved={item.dateSaved}
-      dateTried={item.dateTried}
-      userRating={item.userRating}
-      userNotes={item.userNotes}
-    />
-  );
-
-  const renderGuestView = () => (
-    <View style={styles.guestContainer}>
-      <BookOpen size={64} color="#722F37" />
-      <Text style={styles.guestTitle}>Wine Library</Text>
-      <Text style={styles.guestSubtitle}>
-        Sign in to access your personal wine collection and save your favorite wines
-      </Text>
-      <TouchableOpacity style={styles.loginButton} onPress={handleLoginPress}>
-        <LogIn size={20} color="#FFFFFF" />
-        <Text style={styles.loginButtonText}>Sign In</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderEmptyState = () => (
-    <View style={styles.emptyState}>
-      <BookOpen size={64} color="#CCC" />
-      <Text style={styles.emptyTitle}>Your Wine Library is Empty</Text>
-      <Text style={styles.emptySubtitle}>
-        Start saving wines from the collection to build your personal library
-      </Text>
-    </View>
-  );
 
   if (!user) {
     return (
       <SafeAreaView style={styles.container}>
-        {renderGuestView()}
+        <LinearGradient
+          colors={['#722F37', '#8B4B47']}
+          style={styles.header}
+        >
+          <Text style={styles.headerTitle}>My Wine Library</Text>
+          <Text style={styles.headerSubtitle}>Your personal wine collection</Text>
+        </LinearGradient>
+        
+        <View style={styles.emptyContainer}>
+          <BookOpen size={64} color="#8B5A5F" />
+          <Text style={styles.emptyTitle}>Sign in to view your library</Text>
+          <Text style={styles.emptyMessage}>
+            Create an account to save wines and build your personal collection
+          </Text>
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Wine Library</Text>
-        <Text style={styles.subtitle}>Your personal wine collection</Text>
-      </View>
-
-      {renderStatsCard()}
+      <LinearGradient
+        colors={['#722F37', '#8B4B47']}
+        style={styles.header}
+      >
+        <Text style={styles.headerTitle}>My Wine Library</Text>
+        <Text style={styles.headerSubtitle}>
+          {savedWines.length} wine{savedWines.length !== 1 ? 's' : ''} saved
+        </Text>
+      </LinearGradient>
 
       {savedWines.length === 0 ? (
-        renderEmptyState()
+        <View style={styles.emptyContainer}>
+          <BookOpen size={64} color="#8B5A5F" />
+          <Text style={styles.emptyTitle}>Your library is empty</Text>
+          <Text style={styles.emptyMessage}>
+            Start exploring wines and save your favorites to build your personal collection
+          </Text>
+        </View>
       ) : (
         <FlatList
           data={savedWines}
-          renderItem={renderWineCard}
+          renderItem={renderSavedWine}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContainer}
+          contentContainerStyle={styles.wineList}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
-              refreshing={isLoading}
-              onRefresh={onRefresh}
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
               colors={['#722F37']}
               tintColor="#722F37"
             />
@@ -162,111 +219,142 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingVertical: 30,
+    paddingTop: 50,
   },
-  title: {
-    fontSize: 32,
+  headerTitle: {
     fontFamily: 'PlayfairDisplay-Bold',
-    color: '#722F37',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    lineHeight: 22,
-  },
-  guestContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
-  },
-  guestTitle: {
-    fontSize: 32,
-    fontFamily: 'PlayfairDisplay-Bold',
-    color: '#722F37',
-    marginTop: 20,
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  guestSubtitle: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 32,
-  },
-  loginButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#722F37',
-    borderRadius: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    shadowColor: '#722F37',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  loginButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 24,
-    gap: 12,
-  },
-  statsCard: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  statsNumber: {
     fontSize: 28,
-    fontFamily: 'PlayfairDisplay-Bold',
-    color: '#333',
-    marginBottom: 4,
+    color: '#F5F5DC',
+    marginBottom: 5,
   },
-  statsLabel: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
+  headerSubtitle: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 16,
+    color: '#F5F5DC',
+    opacity: 0.9,
   },
-  listContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 100,
-  },
-  emptyState: {
+  emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 40,
   },
   emptyTitle: {
-    fontSize: 24,
     fontFamily: 'PlayfairDisplay-Bold',
-    color: '#333',
+    fontSize: 24,
+    color: '#722F37',
     marginTop: 20,
-    marginBottom: 12,
+    marginBottom: 10,
     textAlign: 'center',
   },
-  emptySubtitle: {
+  emptyMessage: {
+    fontFamily: 'PlayfairDisplay-Regular',
     fontSize: 16,
-    color: '#666',
+    color: '#8B5A5F',
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 24,
+  },
+  wineList: {
+    padding: 20,
+  },
+  wineCard: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  wineCardContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  wineInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  wineName: {
+    fontFamily: 'PlayfairDisplay-Bold',
+    fontSize: 18,
+    color: '#722F37',
+    marginBottom: 6,
+    lineHeight: 24,
+  },
+  wineDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  wineType: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 14,
+    color: '#8B5A5F',
+    textTransform: 'capitalize',
+  },
+  wineWinery: {
+    fontFamily: 'PlayfairDisplay-Italic',
+    fontSize: 14,
+    color: '#8B5A5F',
+    flex: 1,
+  },
+  separator: {
+    marginHorizontal: 8,
+    color: '#8B5A5F',
+  },
+  wineRegion: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 14,
+    color: '#8B5A5F',
+  },
+  wineYear: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 14,
+    color: '#8B5A5F',
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  priceText: {
+    fontFamily: 'PlayfairDisplay-Bold',
+    fontSize: 14,
+    color: '#8B5A5F',
+    marginLeft: 4,
+  },
+  starsContainer: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  savedDetails: {
+    marginBottom: 8,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  detailText: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 13,
+    color: '#8B5A5F',
+    marginLeft: 6,
+    flex: 1,
+  },
+  description: {
+    fontFamily: 'PlayfairDisplay-Italic',
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
+  },
+  unsaveButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#FFF5F5',
+    alignSelf: 'flex-start',
   },
 });

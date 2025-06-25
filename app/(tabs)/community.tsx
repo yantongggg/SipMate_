@@ -1,696 +1,670 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  FlatList,
-  TouchableOpacity,
   StyleSheet,
+  FlatList,
   SafeAreaView,
-  Share,
+  TouchableOpacity,
   Alert,
+  RefreshControl,
+  Share,
+  Platform,
   TextInput,
   Modal,
   KeyboardAvoidingView,
-  Platform,
-  RefreshControl,
-  ActivityIndicator,
   ScrollView,
-  Keyboard,
-  TouchableWithoutFeedback,
 } from 'react-native';
-import { Heart, MessageCircle, Share2, Plus, X, LogIn, Wine, Search } from 'lucide-react-native';
-import { CommunityPost, Comment, Wine as WineType } from '@/types/wine';
-import { useAuth } from '@/contexts/AuthContext';
-import { useAuthGuard } from '@/hooks/useAuthGuard';
-import { wineService } from '@/services/wineService';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Plus, Heart, MessageCircle, Share2, Trash2, Users, Send, X, ChevronDown, Wine } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
-import { router } from 'expo-router';
-import WineSelectorModal from '@/components/WineSelectorModal';
+import { useRouter } from 'expo-router';
+import { useAuth } from '@/contexts/AuthContext';
+import { useWine } from '@/contexts/WineContext';
+
+interface CommunityPost {
+  id: string;
+  user_id: string;
+  username: string;
+  wine_id: string | null;
+  content: string;
+  created_at: string;
+  wine?: {
+    name: string;
+    type: string;
+    region: string | null;
+    winery: string | null;
+  };
+  likes_count: number;
+  comments_count: number;
+  is_liked: boolean;
+}
+
+interface Comment {
+  id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  profiles: {
+    username: string;
+  };
+}
 
 export default function CommunityScreen() {
+  const { user, profile } = useAuth();
+  const { wines } = useWine();
+  const router = useRouter();
   const [posts, setPosts] = useState<CommunityPost[]>([]);
-  const [showNewPostModal, setShowNewPostModal] = useState(false);
-  const [newPostContent, setNewPostContent] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCommentsModal, setShowCommentsModal] = useState(false);
   const [selectedPost, setSelectedPost] = useState<CommunityPost | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newPostContent, setNewPostContent] = useState('');
+  const [selectedWineId, setSelectedWineId] = useState<string | null>(null);
   const [newComment, setNewComment] = useState('');
-  const [showWineSelector, setShowWineSelector] = useState(false);
-  const [selectedWine, setSelectedWine] = useState<WineType | null>(null);
-  const [wines, setWines] = useState<WineType[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [isLoadingWines, setIsLoadingWines] = useState(false);
-  const [isCreatingPost, setIsCreatingPost] = useState(false);
-  const { user } = useAuth();
-  const { requireAuth } = useAuthGuard();
+  const [showWineDropdown, setShowWineDropdown] = useState(false);
 
   useEffect(() => {
-    loadPosts();
-    loadWines();
+    fetchPosts();
   }, []);
 
-  const loadPosts = async () => {
+  const fetchPosts = async () => {
     try {
-      setIsLoading(true);
-      
-      const { data: postsData, error } = await supabase
+      const { data, error } = await supabase
         .from('community_posts')
         .select(`
           id,
+          user_id,
           username,
-          content,
           wine_id,
-          likes_count,
+          content,
           created_at,
-          wines (
-            name,
-            winery
-          )
+          wines(name, type, region, winery)
         `)
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Error loading posts:', error);
-        Alert.alert('Error', 'Failed to load community posts');
+        console.error('Error fetching posts:', error);
         return;
       }
 
-      const postsWithComments = await Promise.all(
-        (postsData || []).map(async (post) => {
-          const { data: commentsData } = await supabase
-            .from('comments')
-            .select('id, username, content, created_at')
-            .eq('post_id', post.id)
-            .order('created_at', { ascending: true });
-
-          let isLiked = false;
-          if (user) {
-            const { data: likeData } = await supabase
+      // Fetch likes and comments count for each post
+      const postsWithCounts = await Promise.all(
+        (data || []).map(async (post) => {
+          const [likesResult, commentsResult, userLikeResult] = await Promise.all([
+            supabase
+              .from('post_likes')
+              .select('id')
+              .eq('post_id', post.id),
+            supabase
+              .from('comments')
+              .select('id')
+              .eq('post_id', post.id),
+            user ? supabase
               .from('post_likes')
               .select('id')
               .eq('post_id', post.id)
               .eq('user_id', user.id)
-              .maybeSingle();
-            
-            isLiked = !!likeData;
-          }
-
-          const comments: Comment[] = (commentsData || []).map(comment => ({
-            id: comment.id,
-            username: comment.username,
-            content: comment.content,
-            timestamp: formatTimestamp(comment.created_at),
-          }));
+              .maybeSingle() : Promise.resolve({ data: null })
+          ]);
 
           return {
-            id: post.id,
-            username: post.username,
-            content: post.content,
-            wineId: post.wine_id,
-            wineName: post.wines?.name,
-            winery: post.wines?.winery,
-            likes: post.likes_count || 0,
-            comments,
-            timestamp: formatTimestamp(post.created_at),
-            isLiked,
+            ...post,
+            likes_count: likesResult.data?.length || 0,
+            comments_count: commentsResult.data?.length || 0,
+            is_liked: !!userLikeResult.data,
           };
         })
       );
 
-      setPosts(postsWithComments);
+      setPosts(postsWithCounts);
     } catch (error) {
-      console.error('Error loading posts:', error);
-      Alert.alert('Error', 'Failed to load community posts');
+      console.error('Error fetching posts:', error);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const loadWines = async () => {
+  const fetchComments = async (postId: string) => {
     try {
-      setIsLoadingWines(true);
-      const allWines = await wineService.getAllWines();
-      setWines(allWines);
-    } catch (error) {
-      console.error('Error loading wines:', error);
-      // Don't show alert here, just log the error
-    } finally {
-      setIsLoadingWines(false);
-    }
-  };
+      // First, fetch the comments
+      const { data: commentsData, error: commentsError } = await supabase
+        .from('comments')
+        .select('id, user_id, content, created_at')
+        .eq('post_id', postId)
+        .order('created_at', { ascending: true });
 
-  const formatTimestamp = useCallback((timestamp: string) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
-    
-    if (diffInHours < 1) {
-      return 'Just now';
-    } else if (diffInHours < 24) {
-      return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
-    } else {
-      const diffInDays = Math.floor(diffInHours / 24);
-      return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
-    }
-  }, []);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await Promise.all([loadPosts(), loadWines()]);
-    } finally {
-      setRefreshing(false);
-    }
-  }, []);
-
-  const handleLike = useCallback(async (postId: string) => {
-    requireAuth(async () => {
-      if (!user) return;
-
-      try {
-        const post = posts.find(p => p.id === postId);
-        if (!post) return;
-
-        if (post.isLiked) {
-          await supabase
-            .from('post_likes')
-            .delete()
-            .eq('post_id', postId)
-            .eq('user_id', user.id);
-
-          await supabase
-            .from('community_posts')
-            .update({ likes_count: Math.max(0, post.likes - 1) })
-            .eq('id', postId);
-        } else {
-          await supabase
-            .from('post_likes')
-            .insert({
-              post_id: postId,
-              user_id: user.id,
-            });
-
-          await supabase
-            .from('community_posts')
-            .update({ likes_count: post.likes + 1 })
-            .eq('id', postId);
-        }
-
-        setPosts(prevPosts =>
-          prevPosts.map(p =>
-            p.id === postId
-              ? {
-                  ...p,
-                  isLiked: !p.isLiked,
-                  likes: p.isLiked ? p.likes - 1 : p.likes + 1,
-                }
-              : p
-          )
-        );
-      } catch (error) {
-        console.error('Error toggling like:', error);
-        Alert.alert('Error', 'Failed to update like status');
+      if (commentsError) {
+        console.error('Error fetching comments:', commentsError);
+        return;
       }
-    });
-  }, [posts, user, requireAuth]);
 
-  const handleShare = useCallback(async (post: CommunityPost) => {
-    try {
-      const shareContent = post.wineId && post.wineName 
-        ? `Check out this wine post about ${post.wineName} from ${post.username}: "${post.content}" - Shared via SipMate`
-        : `Check out this wine post from ${post.username}: "${post.content}" - Shared via SipMate`;
-      
-      await Share.share({
-        message: shareContent,
-        title: 'Wine Recommendation',
+      if (!commentsData || commentsData.length === 0) {
+        setComments([]);
+        return;
+      }
+
+      // Extract unique user IDs
+      const userIds = [...new Set(commentsData.map(comment => comment.user_id))];
+
+      // Fetch usernames for these user IDs
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, username')
+        .in('id', userIds);
+
+      if (profilesError) {
+        console.error('Error fetching profiles:', profilesError);
+        return;
+      }
+
+      // Create a map of user_id to username
+      const userMap = new Map();
+      (profilesData || []).forEach(profile => {
+        userMap.set(profile.id, profile.username);
       });
+
+      // Map comments with usernames
+      const commentsWithProfiles = commentsData.map(comment => ({
+        ...comment,
+        profiles: {
+          username: userMap.get(comment.user_id) || 'Unknown User'
+        }
+      }));
+
+      setComments(commentsWithProfiles);
     } catch (error) {
-      Alert.alert('Error', 'Failed to share post');
+      console.error('Error fetching comments:', error);
     }
-  }, []);
+  };
 
-  const handleAddComment = useCallback(async () => {
-    requireAuth(async () => {
-      if (!newComment.trim() || !selectedPost || !user) return;
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchPosts();
+    setRefreshing(false);
+  };
 
-      try {
-        const { data, error } = await supabase
-          .from('comments')
-          .insert({
-            post_id: selectedPost.id,
-            user_id: user.id,
-            username: user.username,
-            content: newComment.trim(),
-          })
-          .select()
-          .single();
+  const handleLike = async (postId: string) => {
+    if (!user) {
+      router.push('/auth');
+      return;
+    }
 
-        if (error) {
-          console.error('Error adding comment:', error);
-          Alert.alert('Error', 'Failed to add comment');
-          return;
-        }
+    const post = posts.find(p => p.id === postId);
+    if (!post) return;
 
-        const comment: Comment = {
-          id: data.id,
-          username: user.username,
-          content: newComment.trim(),
-          timestamp: 'Just now',
-        };
-
-        setPosts(prevPosts =>
-          prevPosts.map(post =>
-            post.id === selectedPost.id
-              ? { ...post, comments: [...post.comments, comment] }
-              : post
-          )
-        );
-
-        setNewComment('');
-        setSelectedPost(prev => prev ? { ...prev, comments: [...prev.comments, comment] } : null);
-      } catch (error) {
-        console.error('Error adding comment:', error);
-        Alert.alert('Error', 'Failed to add comment');
+    try {
+      if (post.is_liked) {
+        // Unlike
+        await supabase
+          .from('post_likes')
+          .delete()
+          .eq('post_id', postId)
+          .eq('user_id', user.id);
+      } else {
+        // Like
+        await supabase
+          .from('post_likes')
+          .insert([{ post_id: postId, user_id: user.id }]);
       }
-    });
-  }, [newComment, selectedPost, user, requireAuth]);
 
-  const handleCreatePost = useCallback(async () => {
-    requireAuth(async () => {
-      if (!newPostContent.trim() || !user || isCreatingPost) return;
+      // Update local state
+      setPosts(prev => prev.map(p => 
+        p.id === postId 
+          ? { 
+              ...p, 
+              is_liked: !p.is_liked,
+              likes_count: p.is_liked ? p.likes_count - 1 : p.likes_count + 1
+            }
+          : p
+      ));
+    } catch (error) {
+      console.error('Error toggling like:', error);
+    }
+  };
 
-      setIsCreatingPost(true);
-      
-      try {
-        const postData = {
+  const handleShare = async (post: CommunityPost) => {
+    const shareContent = {
+      message: `Check out this wine post from ${post.username}: "${post.content}"${post.wine ? ` about ${post.wine.name}` : ''}`,
+    };
+
+    try {
+      if (Platform.OS === 'ios') {
+        await Share.share(shareContent);
+      } else {
+        await Share.share({ message: shareContent.message });
+      }
+    } catch (error) {
+      console.error('Error sharing:', error);
+    }
+  };
+
+  const handleDeletePost = (postId: string) => {
+    Alert.alert(
+      'Delete Post',
+      'Are you sure you want to delete this post?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await supabase
+                .from('community_posts')
+                .delete()
+                .eq('id', postId);
+              
+              setPosts(prev => prev.filter(p => p.id !== postId));
+            } catch (error) {
+              console.error('Error deleting post:', error);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleCreatePost = async () => {
+    if (!user || !profile || !newPostContent.trim()) return;
+
+    try {
+      const { error } = await supabase
+        .from('community_posts')
+        .insert([{
           user_id: user.id,
-          username: user.username,
+          username: profile.username,
+          wine_id: selectedWineId,
           content: newPostContent.trim(),
-          wine_id: selectedWine?.id || null,
-          likes_count: 0,
-        };
+        }]);
 
-        const { data, error } = await supabase
-          .from('community_posts')
-          .insert(postData)
-          .select(`
-            id,
-            username,
-            content,
-            wine_id,
-            likes_count,
-            created_at,
-            wines (
-              name,
-              winery
-            )
-          `)
-          .single();
-
-        if (error) {
-          console.error('Error creating post:', error);
-          Alert.alert('Error', 'Failed to create post');
-          return;
-        }
-
-        const newPost: CommunityPost = {
-          id: data.id,
-          username: user.username,
-          content: newPostContent.trim(),
-          wineId: selectedWine?.id,
-          wineName: selectedWine?.name,
-          winery: selectedWine?.winery,
-          likes: 0,
-          comments: [],
-          timestamp: 'Just now',
-          isLiked: false,
-        };
-
-        setPosts(prevPosts => [newPost, ...prevPosts]);
-        handleCloseNewPostModal();
-        Alert.alert('Success', 'Your post has been shared!');
-        
-      } catch (error) {
-        console.error('Error creating post:', error);
+      if (error) {
         Alert.alert('Error', 'Failed to create post');
-      } finally {
-        setIsCreatingPost(false);
+        return;
       }
-    });
-  }, [newPostContent, user, selectedWine, isCreatingPost, requireAuth]);
 
-  const handleNewPost = useCallback(() => {
-    requireAuth(() => {
-      setShowNewPostModal(true);
-    });
-  }, [requireAuth]);
-
-  const handleComments = useCallback((post: CommunityPost) => {
-    requireAuth(() => {
-      setSelectedPost(post);
-      setShowCommentsModal(true);
-    });
-  }, [requireAuth]);
-
-  const handleLoginPress = useCallback(() => {
-    router.push('/auth');
-  }, []);
-
-  const handleWineSelect = useCallback((wine: WineType) => {
-    setSelectedWine(wine);
-    setShowWineSelector(false);
-  }, []);
-
-  const handleTagWinePress = useCallback(() => {
-    if (wines.length === 0) {
-      loadWines();
+      setShowCreateModal(false);
+      setNewPostContent('');
+      setSelectedWineId(null);
+      setShowWineDropdown(false);
+      await fetchPosts();
+    } catch (error) {
+      console.error('Error creating post:', error);
+      Alert.alert('Error', 'Failed to create post');
     }
-    setShowWineSelector(true);
-  }, [wines.length]);
+  };
 
-  const handleRemoveWineTag = useCallback(() => {
-    setSelectedWine(null);
-  }, []);
+  const handleAddComment = async () => {
+    if (!user || !profile || !newComment.trim() || !selectedPost) return;
 
-  const handleCloseNewPostModal = useCallback(() => {
-    Keyboard.dismiss();
-    setShowNewPostModal(false);
-    setSelectedWine(null);
-    setNewPostContent('');
-  }, []);
+    try {
+      const { error } = await supabase
+        .from('comments')
+        .insert([{
+          post_id: selectedPost.id,
+          user_id: user.id,
+          content: newComment.trim(),
+        }]);
 
-  const handleCloseWineSelectorModal = useCallback(() => {
-    setShowWineSelector(false);
-  }, []);
+      if (error) {
+        Alert.alert('Error', 'Failed to add comment');
+        return;
+      }
 
-  const handleCloseCommentsModal = useCallback(() => {
-    Keyboard.dismiss();
-    setShowCommentsModal(false);
-    setSelectedPost(null);
-    setNewComment('');
-  }, []);
+      setNewComment('');
+      await fetchComments(selectedPost.id);
+      
+      // Update comments count in posts
+      setPosts(prev => prev.map(p => 
+        p.id === selectedPost.id 
+          ? { ...p, comments_count: p.comments_count + 1 }
+          : p
+      ));
+    } catch (error) {
+      console.error('Error adding comment:', error);
+      Alert.alert('Error', 'Failed to add comment');
+    }
+  };
 
-  const renderPost = useCallback(({ item }: { item: CommunityPost }) => (
+  const handleShowComments = (post: CommunityPost) => {
+    setSelectedPost(post);
+    setShowCommentsModal(true);
+    fetchComments(post.id);
+  };
+
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    
+    if (diffInMinutes < 1) return 'Just now';
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
+    return `${Math.floor(diffInMinutes / 1440)}d ago`;
+  };
+
+  const getSelectedWineName = () => {
+    if (!selectedWineId) return null;
+    const wine = wines.find(w => w.id === selectedWineId);
+    return wine ? wine.name : null;
+  };
+
+  const renderPost = ({ item }: { item: CommunityPost }) => (
     <View style={styles.postCard}>
       <View style={styles.postHeader}>
         <View style={styles.userInfo}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{item.username.charAt(0).toUpperCase()}</Text>
-          </View>
-          <View style={styles.userTextInfo}>
-            <Text style={styles.username}>{item.username}</Text>
-            <Text style={styles.timestamp}>{item.timestamp}</Text>
-          </View>
+          <Text style={styles.username}>{item.username}</Text>
+          <Text style={styles.timestamp}>{formatTimeAgo(item.created_at)}</Text>
         </View>
+        
+        {user?.id === item.user_id && (
+          <View style={styles.postActions}>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => handleDeletePost(item.id)}
+            >
+              <Trash2 size={16} color="#DC3545" />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
-      {item.wineId && item.wineName && (
-        <View style={styles.wineTag}>
-          <Wine size={16} color="#722F37" />
-          <View style={styles.wineTagContent}>
-            <Text style={styles.wineTagName}>{item.wineName}</Text>
-            {item.winery && (
-              <Text style={styles.wineTagWinery}>{item.winery}</Text>
-            )}
-          </View>
-        </View>
+      {item.wine && (
+        <TouchableOpacity
+          style={styles.wineTag}
+          onPress={() =>
+            router.push({ pathname: '/wine-details', params: { id: item.wine_id } })
+          }
+        >
+          <Text style={styles.wineTagText}>🍷 {item.wine.name}</Text>
+          <Text style={styles.wineTagDetails}>
+            {[item.wine.winery, item.wine.type, item.wine.region]
+              .filter(Boolean)
+              .join(' • ')}
+          </Text>
+        </TouchableOpacity>
       )}
 
       <Text style={styles.postContent}>{item.content}</Text>
 
-      <View style={styles.postActions}>
+      <View style={styles.postFooter}>
         <TouchableOpacity
-          style={styles.actionButton}
+          style={styles.footerButton}
           onPress={() => handleLike(item.id)}
         >
           <Heart
             size={20}
-            color={item.isLiked ? '#E91E63' : '#666'}
-            fill={item.isLiked ? '#E91E63' : 'transparent'}
+            color={item.is_liked ? '#DC3545' : '#8B5A5F'}
+            fill={item.is_liked ? '#DC3545' : 'none'}
           />
-          <Text style={[styles.actionText, item.isLiked && styles.likedText]}>
-            {item.likes}
+          <Text style={[
+            styles.footerButtonText,
+            item.is_liked && styles.footerButtonTextActive
+          ]}>
+            {item.likes_count}
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() => handleComments(item)}
+        <TouchableOpacity 
+          style={styles.footerButton}
+          onPress={() => handleShowComments(item)}
         >
-          <MessageCircle size={20} color="#666" />
-          <Text style={styles.actionText}>{item.comments.length}</Text>
+          <MessageCircle size={20} color="#8B5A5F" />
+          <Text style={styles.footerButtonText}>{item.comments_count}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.actionButton}
+          style={styles.footerButton}
           onPress={() => handleShare(item)}
         >
-          <Share2 size={20} color="#666" />
-          <Text style={styles.actionText}>Share</Text>
+          <Share2 size={20} color="#8B5A5F" />
         </TouchableOpacity>
       </View>
     </View>
-  ), [handleLike, handleComments, handleShare]);
+  );
 
-  const renderComment = useCallback(({ item }: { item: Comment }) => (
+  const renderComment = ({ item }: { item: Comment }) => (
     <View style={styles.commentCard}>
-      <View style={styles.commentHeader}>
-        <View style={styles.commentAvatar}>
-          <Text style={styles.commentAvatarText}>{item.username.charAt(0).toUpperCase()}</Text>
+      <Text style={styles.commentUsername}>{item.profiles.username}</Text>
+      <Text style={styles.commentContent}>{item.content}</Text>
+      <Text style={styles.commentTime}>{formatTimeAgo(item.created_at)}</Text>
+    </View>
+  );
+
+  const CreatePostModal = () => (
+    <Modal visible={showCreateModal} transparent animationType="slide">
+      <KeyboardAvoidingView 
+        style={styles.modalOverlay} 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Create Post</Text>
+            <TouchableOpacity onPress={() => {
+              setShowCreateModal(false);
+              setNewPostContent('');
+              setSelectedWineId(null);
+              setShowWineDropdown(false);
+            }}>
+              <X size={24} color="#722F37" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView 
+            style={styles.modalScrollView}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.modalScrollContent}
+          >
+            <TextInput
+              style={styles.postInput}
+              placeholder="Share your wine experience..."
+              placeholderTextColor="#8B5A5F"
+              value={newPostContent}
+              onChangeText={setNewPostContent}
+              multiline
+              numberOfLines={4}
+              maxLength={500}
+              textAlignVertical="top"
+            />
+
+            <Text style={styles.characterCount}>{newPostContent.length}/500</Text>
+
+            <Text style={styles.sectionLabel}>Link a wine (optional):</Text>
+            
+            {/* Wine Selection */}
+            <TouchableOpacity
+              style={styles.wineSelector}
+              onPress={() => setShowWineDropdown(!showWineDropdown)}
+            >
+              <View style={styles.wineSelectorContent}>
+                <Wine size={20} color="#722F37" />
+                <Text style={[
+                  styles.wineSelectorText,
+                  !selectedWineId && styles.wineSelectorPlaceholder
+                ]}>
+                  {getSelectedWineName() || 'Select a wine'}
+                </Text>
+              </View>
+              <ChevronDown 
+                size={20} 
+                color="#722F37" 
+                style={[
+                  styles.chevron,
+                  showWineDropdown && styles.chevronRotated
+                ]}
+              />
+            </TouchableOpacity>
+
+            {/* Wine Dropdown */}
+            {showWineDropdown && (
+              <View style={styles.wineDropdown}>
+                <ScrollView 
+                  style={styles.wineDropdownScroll}
+                  nestedScrollEnabled={true}
+                  showsVerticalScrollIndicator={true}
+                >
+                  <TouchableOpacity
+                    style={[
+                      styles.wineOption,
+                      !selectedWineId && styles.wineOptionSelected
+                    ]}
+                    onPress={() => {
+                      setSelectedWineId(null);
+                      setShowWineDropdown(false);
+                    }}
+                  >
+                    <Text style={styles.wineOptionText}>No wine selected</Text>
+                  </TouchableOpacity>
+                  
+                  {wines.map((wine) => (
+                    <TouchableOpacity
+                      key={wine.id}
+                      style={[
+                        styles.wineOption,
+                        selectedWineId === wine.id && styles.wineOptionSelected
+                      ]}
+                      onPress={() => {
+                        setSelectedWineId(wine.id);
+                        setShowWineDropdown(false);
+                      }}
+                    >
+                      <View style={styles.wineOptionContent}>
+                        <Text style={styles.wineOptionText}>{wine.name}</Text>
+                        <Text style={styles.wineOptionDetails}>
+                          {[wine.winery, wine.type, wine.region]
+                            .filter(Boolean)
+                            .join(' • ')}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+          </ScrollView>
+
+          <View style={styles.modalFooter}>
+            <TouchableOpacity
+              style={[
+                styles.createButton,
+                !newPostContent.trim() && styles.createButtonDisabled
+              ]}
+              onPress={handleCreatePost}
+              disabled={!newPostContent.trim()}
+            >
+              <Text style={styles.createButtonText}>Post</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        <View style={styles.commentInfo}>
-          <Text style={styles.commentUsername}>{item.username}</Text>
-          <Text style={styles.commentTimestamp}>{item.timestamp}</Text>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+
+  const CommentsModal = () => (
+    <Modal visible={showCommentsModal} transparent animationType="slide">
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Comments</Text>
+            <TouchableOpacity onPress={() => setShowCommentsModal(false)}>
+              <X size={24} color="#722F37" />
+            </TouchableOpacity>
+          </View>
+
+          <FlatList
+            data={comments}
+            renderItem={renderComment}
+            keyExtractor={(item) => item.id}
+            style={styles.commentsList}
+            showsVerticalScrollIndicator={false}
+          />
+
+          {user && (
+            <View style={styles.commentInputContainer}>
+              <TextInput
+                style={styles.commentInput}
+                placeholder="Add a comment..."
+                placeholderTextColor="#8B5A5F"
+                value={newComment}
+                onChangeText={setNewComment}
+                maxLength={200}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.sendButton,
+                  !newComment.trim() && styles.sendButtonDisabled
+                ]}
+                onPress={handleAddComment}
+                disabled={!newComment.trim()}
+              >
+                <Send size={20} color={newComment.trim() ? 'white' : '#8B5A5F'} />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </View>
-      <Text style={styles.commentContent}>{item.content}</Text>
-    </View>
-  ), []);
+    </Modal>
+  );
 
-  const renderGuestPrompt = useCallback(() => (
-    <View style={styles.guestPrompt}>
-      <Text style={styles.guestPromptText}>Sign in to join the conversation</Text>
-      <TouchableOpacity style={styles.guestLoginButton} onPress={handleLoginPress}>
-        <LogIn size={16} color="#FFFFFF" />
-        <Text style={styles.guestLoginText}>Sign In</Text>
-      </TouchableOpacity>
-    </View>
-  ), [handleLoginPress]);
-
-  const keyExtractor = useCallback((item: CommunityPost) => item.id, []);
-  const commentKeyExtractor = useCallback((item: Comment) => item.id, []);
+  const handleCreatePost_Button = () => {
+    if (!user) {
+      router.push('/auth');
+      return;
+    }
+    setShowCreateModal(true);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Wine Community</Text>
-        <Text style={styles.subtitle}>Share your wine experiences</Text>
-        {user ? (
+      <LinearGradient
+        colors={['#722F37', '#8B4B47']}
+        style={styles.header}
+      >
+        <View style={styles.headerContent}>
+          <View>
+            <Text style={styles.headerTitle}>Wine Community</Text>
+            <Text style={styles.headerSubtitle}>Share your wine experiences</Text>
+          </View>
           <TouchableOpacity
-            style={styles.addPostButton}
-            onPress={handleNewPost}
+            style={styles.createButton}
+            onPress={handleCreatePost_Button}
           >
-            <Plus size={20} color="#FFFFFF" />
-            <Text style={styles.addPostText}>New Post</Text>
+            <Plus size={24} color="white" />
           </TouchableOpacity>
-        ) : (
-          renderGuestPrompt()
-        )}
-      </View>
+        </View>
+      </LinearGradient>
 
-      {isLoading && posts.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#722F37" />
-          <Text style={styles.loadingText}>Loading community posts...</Text>
+      {posts.length === 0 && !loading ? (
+        <View style={styles.emptyContainer}>
+          <Users size={64} color="#8B5A5F" />
+          <Text style={styles.emptyTitle}>No posts yet</Text>
+          <Text style={styles.emptyMessage}>
+            Be the first to share your wine experience with the community!
+          </Text>
         </View>
       ) : (
         <FlatList
           data={posts}
           renderItem={renderPost}
-          keyExtractor={keyExtractor}
-          contentContainerStyle={styles.listContainer}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.postsList}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={onRefresh}
+              onRefresh={handleRefresh}
               colors={['#722F37']}
               tintColor="#722F37"
             />
           }
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No posts yet. Be the first to share!</Text>
-            </View>
-          }
-          removeClippedSubviews={true}
-          maxToRenderPerBatch={10}
-          windowSize={10}
-          initialNumToRender={8}
         />
       )}
 
-      {/* New Post Modal */}
-      <Modal
-        visible={showNewPostModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={handleCloseNewPostModal}
-      >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <KeyboardAvoidingView 
-            style={styles.modalContainer}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          >
-            <SafeAreaView style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <TouchableOpacity onPress={handleCloseNewPostModal}>
-                  <X size={24} color="#666" />
-                </TouchableOpacity>
-                <Text style={styles.modalTitle}>New Post</Text>
-                <TouchableOpacity
-                  onPress={handleCreatePost}
-                  disabled={!newPostContent.trim() || isCreatingPost}
-                >
-                  <Text style={[
-                    styles.postButton, 
-                    (!newPostContent.trim() || isCreatingPost) && styles.postButtonDisabled
-                  ]}>
-                    {isCreatingPost ? 'Posting...' : 'Post'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <ScrollView 
-                style={styles.modalContent} 
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-              >
-                {selectedWine && (
-                  <View style={styles.selectedWineContainer}>
-                    <Wine size={16} color="#722F37" />
-                    <View style={styles.selectedWineContent}>
-                      <Text style={styles.selectedWineName}>{selectedWine.name}</Text>
-                      <Text style={styles.selectedWineWinery}>{selectedWine.winery}</Text>
-                    </View>
-                    <TouchableOpacity onPress={handleRemoveWineTag}>
-                      <X size={16} color="#666" />
-                    </TouchableOpacity>
-                  </View>
-                )}
-                
-                <TextInput
-                  style={styles.postInput}
-                  value={newPostContent}
-                  onChangeText={setNewPostContent}
-                  placeholder="Share your wine experience, tasting notes, or recommendations..."
-                  placeholderTextColor="#999"
-                  multiline
-                  textAlignVertical="top"
-                  maxLength={500}
-                />
-
-                <View style={styles.postActionsContainer}>
-                  <TouchableOpacity 
-                    style={styles.tagWineButton}
-                    onPress={handleTagWinePress}
-                  >
-                    <Wine size={16} color="#722F37" />
-                    <Text style={styles.tagWineText}>Tag a Wine</Text>
-                  </TouchableOpacity>
-                  
-                  <Text style={styles.characterCount}>
-                    {newPostContent.length}/500 characters
-                  </Text>
-                </View>
-              </ScrollView>
-            </SafeAreaView>
-          </KeyboardAvoidingView>
-        </TouchableWithoutFeedback>
-      </Modal>
-
-      {/* Wine Selector Modal */}
-      <WineSelectorModal
-        visible={showWineSelector}
-        onClose={handleCloseWineSelectorModal}
-        wines={wines}
-        onSelect={handleWineSelect}
-        isLoading={isLoadingWines}
-        onRetryLoad={loadWines}
-      />
-
-      {/* Comments Modal */}
-      <Modal
-        visible={showCommentsModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={handleCloseCommentsModal}
-      >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <KeyboardAvoidingView 
-            style={styles.modalContainer}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          >
-            <SafeAreaView style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <TouchableOpacity onPress={handleCloseCommentsModal}>
-                  <X size={24} color="#666" />
-                </TouchableOpacity>
-                <Text style={styles.modalTitle}>Comments</Text>
-                <View />
-              </View>
-
-              {selectedPost && (
-                <>
-                  <FlatList
-                    data={selectedPost.comments}
-                    renderItem={renderComment}
-                    keyExtractor={commentKeyExtractor}
-                    style={styles.commentsList}
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                    ListEmptyComponent={
-                      <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyText}>No comments yet. Be the first to comment!</Text>
-                      </View>
-                    }
-                  />
-
-                  {user ? (
-                    <View style={styles.commentInputContainer}>
-                      <TextInput
-                        style={styles.commentInput}
-                        value={newComment}
-                        onChangeText={setNewComment}
-                        placeholder="Add a comment..."
-                        placeholderTextColor="#999"
-                        multiline
-                        maxLength={200}
-                      />
-                      <TouchableOpacity
-                        style={[styles.commentButton, !newComment.trim() && styles.commentButtonDisabled]}
-                        onPress={handleAddComment}
-                        disabled={!newComment.trim()}
-                      >
-                        <Text style={[styles.commentButtonText, !newComment.trim() && styles.commentButtonTextDisabled]}>
-                          Post
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <View style={styles.commentGuestPrompt}>
-                      <Text style={styles.commentGuestText}>Sign in to comment</Text>
-                      <TouchableOpacity style={styles.commentGuestButton} onPress={handleLoginPress}>
-                        <Text style={styles.commentGuestButtonText}>Sign In</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </>
-              )}
-            </SafeAreaView>
-          </KeyboardAvoidingView>
-        </TouchableWithoutFeedback>
-      </Modal>
+      <CreatePostModal />
+      <CommentsModal />
     </SafeAreaView>
   );
 }
@@ -702,103 +676,65 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingVertical: 30,
+    paddingTop: 50,
   },
-  title: {
-    fontSize: 32,
-    fontFamily: 'PlayfairDisplay-Bold',
-    color: '#722F37',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    lineHeight: 22,
-    marginBottom: 16,
-  },
-  addPostButton: {
+  headerContent: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#722F37',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    alignSelf: 'flex-start',
-  },
-  addPostText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  guestPrompt: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
     justifyContent: 'space-between',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  guestPromptText: {
-    fontSize: 16,
-    color: '#666',
-    flex: 1,
-  },
-  guestLoginButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#722F37',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  guestLoginText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    marginLeft: 4,
-    fontSize: 14,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingText: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 16,
+  headerTitle: {
+    fontFamily: 'PlayfairDisplay-Bold',
+    fontSize: 28,
+    color: '#F5F5DC',
+    marginBottom: 5,
   },
-  listContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 100,
+  headerSubtitle: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 16,
+    color: '#F5F5DC',
+    opacity: 0.9,
+  },
+  createButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 20,
+    padding: 10,
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingHorizontal: 40,
   },
-  emptyText: {
-    fontSize: 16,
-    color: '#666',
+  emptyTitle: {
+    fontFamily: 'PlayfairDisplay-Bold',
+    fontSize: 24,
+    color: '#722F37',
+    marginTop: 20,
+    marginBottom: 10,
     textAlign: 'center',
-    marginBottom: 16,
+  },
+  emptyMessage: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 16,
+    color: '#8B5A5F',
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  postsList: {
+    padding: 20,
   },
   postCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'white',
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
   },
   postHeader: {
     flexDirection: 'row',
@@ -807,292 +743,262 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#722F37',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  avatarText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  userTextInfo: {
     flex: 1,
   },
   username: {
+    fontFamily: 'PlayfairDisplay-Bold',
     fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 2,
-  },
-  timestamp: {
-    fontSize: 12,
-    color: '#666',
-  },
-  wineTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8F4F0',
-    borderRadius: 8,
-    padding: 8,
-    marginBottom: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: '#722F37',
-  },
-  wineTagContent: {
-    marginLeft: 8,
-    flex: 1,
-  },
-  wineTagName: {
-    fontSize: 14,
-    fontWeight: '600',
     color: '#722F37',
     marginBottom: 2,
   },
-  wineTagWinery: {
+  timestamp: {
+    fontFamily: 'PlayfairDisplay-Regular',
     fontSize: 12,
-    color: '#666',
-  },
-  postContent: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#333',
-    marginBottom: 16,
+    color: '#8B5A5F',
   },
   postActions: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
   },
   actionButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  wineTag: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  wineTagText: {
+    fontFamily: 'PlayfairDisplay-Bold',
+    fontSize: 14,
+    color: '#722F37',
+    marginBottom: 2,
+  },
+  wineTagDetails: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 12,
+    color: '#8B5A5F',
+    textTransform: 'capitalize',
+  },
+  postContent: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 16,
+    color: '#333',
+    lineHeight: 24,
+    marginBottom: 16,
+  },
+  postFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    paddingTop: 12,
   },
-  actionText: {
-    marginLeft: 6,
+  footerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 24,
+  },
+  footerButtonText: {
+    fontFamily: 'PlayfairDisplay-Regular',
     fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
+    color: '#8B5A5F',
+    marginLeft: 6,
   },
-  likedText: {
-    color: '#E91E63',
+  footerButtonTextActive: {
+    color: '#DC3545',
   },
-  modalContainer: {
+  modalOverlay: {
     flex: 1,
-    backgroundColor: '#F5F5DC',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '85%',
+    flex: 1,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-    backgroundColor: '#FFFFFF',
+    borderBottomColor: '#F0F0F0',
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-  },
-  postButton: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'PlayfairDisplay-Bold',
+    fontSize: 24,
     color: '#722F37',
   },
-  postButtonDisabled: {
-    color: '#999',
-  },
-  modalContent: {
+  modalScrollView: {
     flex: 1,
-    padding: 20,
   },
-  selectedWineContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8F4F0',
+  modalScrollContent: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+  modalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  postInput: {
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
     borderRadius: 8,
     padding: 12,
-    marginBottom: 16,
-    borderLeftWidth: 3,
-    borderLeftColor: '#722F37',
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 16,
+    textAlignVertical: 'top',
+    minHeight: 100,
+    marginBottom: 8,
   },
-  selectedWineContent: {
-    marginLeft: 8,
+  characterCount: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 12,
+    color: '#8B5A5F',
+    textAlign: 'right',
+    marginBottom: 16,
+  },
+  sectionLabel: {
+    fontFamily: 'PlayfairDisplay-Bold',
+    fontSize: 16,
+    color: '#722F37',
+    marginBottom: 8,
+  },
+  wineSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    marginBottom: 8,
+  },
+  wineSelectorContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flex: 1,
   },
-  selectedWineName: {
+  wineSelectorText: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 16,
+    color: '#722F37',
+    marginLeft: 8,
+  },
+  wineSelectorPlaceholder: {
+    color: '#8B5A5F',
+  },
+  chevron: {
+    transform: [{ rotate: '0deg' }],
+  },
+  chevronRotated: {
+    transform: [{ rotate: '180deg' }],
+  },
+  wineDropdown: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    maxHeight: 200,
+    marginBottom: 16,
+  },
+  wineDropdownScroll: {
+    maxHeight: 200,
+  },
+  wineOption: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  wineOptionSelected: {
+    backgroundColor: '#722F37',
+  },
+  wineOptionContent: {
+    flex: 1,
+  },
+  wineOptionText: {
+    fontFamily: 'PlayfairDisplay-Regular',
     fontSize: 14,
-    fontWeight: '600',
     color: '#722F37',
     marginBottom: 2,
   },
-  selectedWineWinery: {
+  wineOptionDetails: {
+    fontFamily: 'PlayfairDisplay-Regular',
     fontSize: 12,
-    color: '#666',
+    color: '#8B5A5F',
   },
-  postInput: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    lineHeight: 24,
-    minHeight: 120,
-    textAlignVertical: 'top',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    marginBottom: 16,
-  },
-  postActionsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  tagWineButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8F4F0',
+  createButton: {
+    backgroundColor: '#722F37',
+    paddingVertical: 12,
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#722F37',
   },
-  tagWineText: {
-    marginLeft: 6,
-    fontSize: 14,
-    color: '#722F37',
-    fontWeight: '500',
+  createButtonDisabled: {
+    opacity: 0.5,
   },
-  characterCount: {
-    fontSize: 12,
-    color: '#666',
+  createButtonText: {
+    fontFamily: 'PlayfairDisplay-Bold',
+    fontSize: 16,
+    color: 'white',
+    textAlign: 'center',
   },
   commentsList: {
     flex: 1,
-    paddingHorizontal: 20,
+    padding: 20,
   },
   commentCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
     padding: 12,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  commentHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
     marginBottom: 8,
   },
-  commentAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#722F37',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  commentAvatarText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  commentInfo: {
-    flex: 1,
-  },
   commentUsername: {
+    fontFamily: 'PlayfairDisplay-Bold',
     fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 2,
-  },
-  commentTimestamp: {
-    fontSize: 11,
-    color: '#666',
+    color: '#722F37',
+    marginBottom: 4,
   },
   commentContent: {
+    fontFamily: 'PlayfairDisplay-Regular',
     fontSize: 14,
-    lineHeight: 20,
     color: '#333',
+    marginBottom: 4,
+  },
+  commentTime: {
+    fontFamily: 'PlayfairDisplay-Regular',
+    fontSize: 12,
+    color: '#8B5A5F',
   },
   commentInputContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    padding: 20,
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+    borderTopColor: '#E5E5E5',
   },
   commentInput: {
     flex: 1,
-    backgroundColor: '#F8F8F8',
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
+    marginRight: 8,
+    fontFamily: 'PlayfairDisplay-Regular',
     fontSize: 14,
-    maxHeight: 80,
-    marginRight: 12,
   },
-  commentButton: {
+  sendButton: {
     backgroundColor: '#722F37',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderRadius: 20,
+    padding: 8,
   },
-  commentButtonDisabled: {
-    backgroundColor: '#CCC',
-  },
-  commentButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  commentButtonTextDisabled: {
-    color: '#999',
-  },
-  commentGuestPrompt: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
-  },
-  commentGuestText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  commentGuestButton: {
-    backgroundColor: '#722F37',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  commentGuestButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 12,
+  sendButtonDisabled: {
+    backgroundColor: '#E5E5E5',
   },
 });
