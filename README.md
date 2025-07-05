@@ -59,6 +59,7 @@ types/ TypeScript definitions
 ### 1. Clone the repository
 
 git clone https://github.com/yantongggg/SipMate_.git
+
 cd SipMate_
 
 ### 2. Install dependencies
