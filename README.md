@@ -1,86 +1,141 @@
-🍷 SipMate Wine Discovery
-SipMate Wine Discovery is a modern web and mobile app for wine enthusiasts. Built with Expo and React Native, it helps users discover, track, and share their wine experiences while providing an admin panel to manage the catalog.
+# 🍷 SipMate Wine Discovery
 
-✨ Key Features
-Admin Panel
+SipMate Wine Discovery is a modern mobile and web app built with **Expo** and **React Native** for wine lovers to discover, track, and share their wine experiences. It includes a robust admin panel for catalog management and an engaging public interface for browsing and community interaction.
 
-Create, edit, and delete wines
+---
 
-Upload and manage images
+## ✨ Features
 
-Search, filter, and view statistics
+### 🛠️ Admin Panel
 
-Public App
+- **Manage Wines:** Create, edit, and delete entries.
+- **Image Uploads:** Upload and preview wine images.
+- **Search & Filter:** Quickly find and organize wines.
+- **Statistics:** View real-time data and usage analytics.
 
-Browse detailed wine profiles with AI-generated summaries and food pairings
+### 🌐 Public App
 
-Save favorites and tasting notes
+- **Wine Explorer:** Browse detailed wine profiles with AI-generated summaries and food pairings.
+- **Favorites & Notes:** Save wines and track tasting history.
+- **Recommendations:** Get personalized suggestions based on mood, occasion, and budget.
+- **Community:** Share experiences and engage with other users.
+- **Responsive Design:** Optimized for web and mobile devices.
 
-Get personalized recommendations
+---
 
-Engage with the wine community
+## 🛠️ Tech Stack
 
-Manage personal profiles
+- **Framework:** Expo (SDK 52)
+- **Routing:** Expo Router
+- **Database & Authentication:** Supabase
+- **State Management:** React Context API
+- **Storage:** Supabase Storage
+- **UI:** React Native + StyleSheet
+- **Icons:** lucide-react-native
+- **Animations:** react-native-reanimated
+- **Gestures:** react-native-gesture-handler
+- **Payments:** RevenueCat (planned)
 
-Responsive Design
+---
 
-Optimized for web and mobile
+## 📂 Project Structure
+app/ Application routes and screens
+(tabs)/ Main navigation tabs
+admin/ Admin panel screens
+auth.tsx Authentication screen
+wine-details.tsx Wine detail view
+components/ Reusable UI components
+contexts/ Global state providers
+hooks/ Custom React hooks
+lib/ Utility functions (e.g., Supabase helpers)
+supabase/ Database schema and migrations
+types/ TypeScript definitions
 
-🛠️ Technology
-Framework: Expo + React Native
 
-Database: Supabase
+---
 
-Routing: Expo Router
+## 🚀 Getting Started
 
-State Management: React Context API
+### 1. Clone the repository
 
-Storage: Supabase Storage
+git clone https://github.com/yantongggg/SipMate_.git
+cd SipMate_
 
-Payments: RevenueCat (planned)
+### 2. Install dependencies
 
-Animations & Gestures: Reanimated, Gesture Handler
-
-🗂️ Project Structure Overview
-pgsql
-Copy
-Edit
-app/           Screens and routes
-components/    Reusable UI components
-contexts/      Global state
-hooks/         Custom hooks
-lib/           Utilities
-supabase/      Database schema
-types/         Type definitions
-⚙️ Development Notes
-Expo Managed Workflow only (no native code)
-
-Use StyleSheet.create for styling
-
-Use lucide-react-native for icons
-
-All environment variables must be prefixed with EXPO_PUBLIC
-
-🛡️ Security
-Row Level Security enabled in Supabase
-
-Input validation and sanitization throughout
-
-Auth required for admin and personal features
-
-🚀 Getting Started
-Clone the repo, install dependencies, and start the dev server:
-
-bash
-Copy
-Edit
-git clone https://github.com/yantongggg/SipMate_
-cd sipmate
 npm install
-npm run dev
-💬 License & Contributions
-Open to contributions. See CONTRIBUTING.md for details.
 
-📫 Contact
-Questions or suggestions? Open an issue.
+### 3. Run the development server
+npm run dev
+
+### 4. Configure environment variables
+
+- Create a `.env` file
+- Use Expo variable naming (`EXPO_PUBLIC_` prefix)
+
+---
+
+## 🛡️ Security & Constraints
+
+- Row-Level Security enabled in Supabase
+- Authentication required for admin and user features
+- Expo Managed Workflow only
+- Styling must use StyleSheet.create
+- Environment variables must start with EXPO_PUBLIC_
+- Icons must use lucide-react-native
+- Errors displayed inline instead of Alert
+
+---
+
+## 📄 API Endpoints
+
+GET /api/wines
+
+- Returns all wines with metadata
+
+POST /api/wines
+
+- Creates a new wine entry
+
+Validation Rules:
+
+- Rating: 0–5
+- Year: 1800–current year
+- Alcohol: 0–50%
+- Price: Positive decimal
+- Type: red, white, rose, sparkling
+
+---
+
+## 🖼 Image Storage
+
+- Bucket: wine-images
+- Folder: pictures
+- URL format: https://supabase.com/dashboard/project/gcvtaawcowvtytbsnftq/storage/buckets/wine-images
+
+---
+
+## 📈 Sample Data
+
+Includes example wines for testing.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome. Please open an issue or pull request.
+
+---
+
+## 📫 Contact
+
+Questions or suggestions? Open an issue on the repository.
+
+---
+
+## 📝 License
+
+MIT License.
+
+
 
