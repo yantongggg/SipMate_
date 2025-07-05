@@ -58,7 +58,7 @@ types/ TypeScript definitions
 
 ### 1. Clone the repository
 
-git clone https://github.com/yantongggg/SipMate_.git
+git clone https://github.com/yantongggg/SipMate_
 
 cd SipMate_
 
