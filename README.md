@@ -54,28 +54,6 @@ types/ TypeScript definitions
 
 ---
 
-## 🚀 Getting Started
-
-### 1. Clone the repository
-
-git clone https://github.com/yantongggg/SipMate_
-
-cd SipMate_
-
-### 2. Install dependencies
-
-npm install
-
-### 3. Run the development server
-npm run dev
-
-### 4. Configure environment variables
-
-- Create a `.env` file
-- Use Expo variable naming (`EXPO_PUBLIC_` prefix)
-
----
-
 ## 🛡️ Security & Constraints
 
 - Row-Level Security enabled in Supabase
