@@ -1,22 +1,21 @@
-name: Threat Modeling
+name: Security Threat Model
+permissions:
+  contents: read       
+  pull-requests: write  
+  actions: write       
+  checks: write        
 
-  on:
-    push:
-      branches: [main, master, develop]
-    pull_request:
-      branches: [main, master, develop]
-    workflow_dispatch:
+on:
+  push:
+    branches: [ "main", "master", "develop" ]
+  pull_request:
+    branches: [ "main", "master", "develop" ]
+  workflow_dispatch:
 
-  # Add this permissions section!
-  permissions:
-    contents: read
-    pull-requests: write
-    actions: write
-
-  jobs:
-    threat-modeling:
-      uses: yantongggg/TMm_sCaN/.github/workflows/threat-modeling-reusable.yml@master
-      with:
-        auto_discovery: true
-      secrets:
-        zhipu_api_key: ${{ secrets.ZHIPU_API_KEY }}
+jobs:
+  threat-modeling:
+    uses: yantongggg/TMm_sCaN/.github/workflows/threat-modeling-reusable.yml@master
+    with:
+      auto_discovery: true 
+    secrets:
+      zhipu_api_key: ${{ secrets.ZHIPU_API_KEY }}
