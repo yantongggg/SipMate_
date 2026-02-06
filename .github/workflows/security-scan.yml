@@ -14,7 +14,7 @@ on:
 
 jobs:
   threat-modeling:
-    uses: yantongggg/TMm_sCaN/.github/workflows/threat-modeling-reusable.yml@v1.0.1
+    uses: yantongggg/TM_M/.github/workflows/threat-modeling-reusable.yml@v1.0.1
     with:
       auto_discovery: true 
     secrets:
