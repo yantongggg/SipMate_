@@ -18,4 +18,4 @@ jobs:
     with:
       auto_discovery: true 
     secrets:
-      zhipu_api_key: ${{ secrets.openrouter_api_key }}
+      openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
