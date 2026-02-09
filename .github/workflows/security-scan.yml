@@ -19,3 +19,6 @@ jobs:
       auto_discovery: true 
     secrets:
       openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+
+
+
