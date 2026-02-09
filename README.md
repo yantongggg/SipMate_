@@ -112,6 +112,10 @@ Questions or suggestions? Open an issue on the repository.
 
 ---
 
+
+triggerrr
+
+
 ## 📝 License
 
 MIT License.
