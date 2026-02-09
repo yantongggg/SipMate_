@@ -1,24 +1,20 @@
-name: Security Threat Model
-permissions:
-  contents: read       
-  pull-requests: write  
-  actions: write       
-  checks: write        
+  name: Security Scanning
 
-on:
-  push:
-    branches: [ "main", "master", "develop" ]
-  pull_request:
-    branches: [ "main", "master", "develop" ]
-  workflow_dispatch:
+  permissions:
+    contents: read
+    pull-quests: write
+    actions: write
 
-jobs:
-  threat-modeling:
-    uses: yantongggg/TM_M/.github/workflows/threat-modeling-reusable.yml@v1.0.1
-    with:
-      auto_discovery: true 
-    secrets:
-      openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+  on:
+    push:
+      branches: [ "main", "master", "develop" ]
+    pull_request:
+      branches: [ "main", "master", "develop" ]
+    workflow_dispatch:
 
-
-
+  jobs:
+    sast-scan:
+      uses: yantongggg/TM_M/.github/workflows/sast-reusable.yml@v1.0.2
+      with:
+        semgrep_config: auto
+        security_mode: audit
