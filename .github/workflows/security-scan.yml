@@ -2,8 +2,9 @@
 
   permissions:
     contents: read
-    pull-quests: write
+    pull-requests: write
     actions: write
+    checks: write
 
   on:
     push:
@@ -16,5 +17,6 @@
     sast-scan:
       uses: yantongggg/TM_M/.github/workflows/sast-reusable.yml@v1.0.2
       with:
-        semgrep_config: auto
-        security_mode: audit
+        semgrep_config: auto        # Semgrep rules: auto, security, p/ci
+        security_mode: audit        # audit = non-blocking, block = fail on findings
+        fail_on_high_severity: false # Set true to fail workflow on Critical/High
